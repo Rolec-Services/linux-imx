@@ -771,13 +771,21 @@
 	};
 };
 
+/* Cortex A53 debug UART */
 &lpuart1 { /* console */
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_uart1>;
 	status = "okay";
 };
 
-// Modem UART8
+/* MODBUS UART7 */
+&lpuart7 { /* modem */
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_uart7>;
+	status = "okay";
+};
+
+/* Modem UART8 */
 &lpuart8 { /* modem */
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_uart8>;
@@ -1060,6 +1068,15 @@
 		fsl,pins = <
 			MX93_PAD_UART1_RXD__LPUART1_RX			0x31e
 			MX93_PAD_UART1_TXD__LPUART1_TX			0x31e
+		>;
+	};
+
+	pinctrl_uart7: uart7grp {
+		fsl,pins = <
+			MX93_PAD_GPIO_IO09__LPUART7_RX			0x31e
+			MX93_PAD_GPIO_IO08__LPUART7_TX			0x31e
+			MX93_PAD_GPIO_IO11__LPUART7_RTS_B		0x31e
+			/* MX93_PAD_GPIO_IO14__LPUART7_CTS_B		0x31e */
 		>;
 	};
 
