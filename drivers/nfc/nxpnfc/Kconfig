@@ -1,0 +1,31 @@
+#
+# near field communication driver configuration
+#
+config NXP_NFC
+	tristate
+	help
+	  NXP PN71xx/SNxxx core driver.
+	  This is a driver based on the HCI NFC kernel layers and
+	  will thus not work with NXP libnfc library.
+
+config NXP_NFC_I2C
+	tristate "NXP NCI based NFC I2C Slave Driver for SNxxx"
+	depends on I2C
+	default n
+	select NXP_NFC
+	help
+	  This enables the NFC driver for SNxxx based devices.
+	  This is for I2C connected version. NCI protocol logic
+	  resides in the usermode and it has no other NFC dependencies.
+	  If unsure, say N.
+
+config NXP_NFC_SPI
+	tristate "NXP NFC SPI Slave driver for PN71xx devices"
+	depends on SPI
+	default n
+	select NXP_NFC
+	help
+	 This enables the NFC driver for PN71xx based devices.
+	 This is for SPI connected version. NCI protocol logic
+	 resides in the usermode and it has no other NFC dependencies.
+	 If unsure, say N.

@@ -636,6 +636,7 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_lpi2c3>;
 	status = "okay";
+
 /* AM
 	adp5585_isp: io-expander-isp@34 {
 		compatible = "adi,adp5585-01", "adi,adp5585";
@@ -645,6 +646,7 @@
 		#pwm-cells = <3>;
 	};
 */
+
 /*
 	ap1302: ap1302_mipi@3c {
 		compatible = "onnn,ap1302";
@@ -697,6 +699,8 @@
 		};
 	};
 */
+
+/* AM
 	ptn5110: tcpc@50 {
 		compatible = "nxp,ptn5110", "tcpci";
 		reg = <0x50>;
@@ -729,7 +733,9 @@
 			};
 		};
 	};
+*/
 
+/* AM
 	ptn5110_2: tcpc@51 {
 		compatible = "nxp,ptn5110", "tcpci";
 		reg = <0x51>;
@@ -762,6 +768,7 @@
 			};
 		};
 	};
+*/
 
 	pcf2131: rtc@53 {
 		compatible = "nxp,pcf2131";
@@ -769,6 +776,20 @@
 		interrupt-parent = <&pcal6524>;
 		interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
 	};
+
+/* AM
+	max98089: audio-codec@10 {
+		compatible = "maxim,max98089";
+		reg = <0x10>;
+
+		clocks = <&tegra_pmc TEGRA_PMC_CLK_OUT_1>;
+		clock-names = "mclk";
+
+		assigned-clocks = <&tegra_pmc TEGRA_PMC_CLK_OUT_1>;
+		assigned-clock-parents = <&tegra_car TEGRA30_CLK_EXTERN1>;
+	};
+*/
+
 };
 
 /* Cortex A53 debug UART */
@@ -779,7 +800,7 @@
 };
 
 /* MODBUS UART7 */
-&lpuart7 { /* modem */
+&lpuart7 { /* MODBUS */
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_uart7>;
 	status = "okay";
@@ -792,7 +813,26 @@
 	status = "okay";
 };
 
+&lpspi6 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lpspi6>;
+	status = "okay";
 
+	nxpnfc@0 {
+        compatible = "nxp,nxpnfc";
+        reg = <0>; /* CS0 */
+        spi-max-frequency = <5000000>; /* start safe; tune as needed */
+
+		 /* muxing of IRQ pin */
+        pinctrl-names = "default";
+        pinctrl-0 = <&pinctrl_pn7161_irq>;
+
+        nxp,nxpnfc-irq = <&gpio2 10 GPIO_ACTIVE_HIGH>;
+        nxp,nxpnfc-ven = <&pcal6524 6 GPIO_ACTIVE_HIGH>;
+        nxp,nxpnfc-fw-dwnld = <&pcal6524 22 GPIO_ACTIVE_HIGH>; /* optional */
+		status = "okay";
+    };
+};
 
 /* AM
 &lpuart5 {
@@ -854,6 +894,7 @@
 	status = "okay";
 };
 
+/* AM
 &usbotg1 {
 	dr_mode = "otg";
 	hnp-disable;
@@ -889,6 +930,7 @@
 		};
 	};
 };
+*/
 
 &usdhc1 {
 	pinctrl-names = "default", "state_100mhz", "state_200mhz";
@@ -1118,6 +1160,21 @@
 		fsl,pins = <
 			MX93_PAD_GPIO_IO28__LPI2C3_SDA			0x40000b9e
 			MX93_PAD_GPIO_IO29__LPI2C3_SCL			0x40000b9e
+		>;
+	};
+
+	pinctrl_lpspi6: lpspi6grp {
+		fsl,pins = <
+			MX93_PAD_GPIO_IO00__LPSPI6_PCS0			0x011e
+			MX93_PAD_GPIO_IO01__LPSPI6_SIN			0x1400
+			MX93_PAD_GPIO_IO02__LPSPI6_SOUT			0x051e
+			MX93_PAD_GPIO_IO03__LPSPI6_SCK			0x051e
+		>;
+	};
+
+	pinctrl_pn7161_irq: pn7161irqgrp {
+		fsl,pins = <
+			MX93_PAD_GPIO_IO10__GPIO2_IO10			0x1400
 		>;
 	};
 
