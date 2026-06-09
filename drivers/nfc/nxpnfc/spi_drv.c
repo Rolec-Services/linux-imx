@@ -39,6 +39,8 @@
 #include "spi_drv.h"
 #include "common.h"
 
+#define TP() pr_debug("%s:%s:%d\n", __FILE__, __func__, __LINE__)
+
 /**
  * spi_disable_irq()
  *
@@ -447,12 +449,19 @@ int nfc_spi_dev_probe(struct spi_device *client)
 		pr_err("%s: request_irq failed\n", __func__);
 		goto err_nfc_misc_unregister;
 	}
+	TP();
 	spi_disable_irq(nfc_dev);
+	TP();
 	gpio_set_ven(nfc_dev, 1);
+	TP();
 	gpio_set_ven(nfc_dev, 0);
+	TP();
 	gpio_set_ven(nfc_dev, 1);
+	TP();
 	device_init_wakeup(&client->dev, true);
+	TP();
 	spi_set_drvdata(client, nfc_dev);
+	TP();
 	spi_dev->irq_wake_up = false;
 
 	pr_info("%s: probing nfc spi successfully\n", __func__);

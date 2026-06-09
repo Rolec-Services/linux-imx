@@ -23,6 +23,8 @@
 
 #include "common.h"
 
+#define TP() pr_debug("%s:%s:%d\n", __FILE__, __func__, __LINE__)
+
 int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 		 uint8_t interface)
 {
@@ -68,7 +70,7 @@ void set_valid_gpio(int gpio, int value)
 {
 	if (gpio_is_valid(gpio)) {
 		pr_debug("%s: gpio %d value %d\n", __func__, gpio, value);
-		gpio_set_value(gpio, value);
+		gpio_set_value_cansleep(gpio, value);
 		/* hardware dependent delay */
 		usleep_range(NFC_GPIO_SET_WAIT_TIME_US,
 			     NFC_GPIO_SET_WAIT_TIME_US + 100);
@@ -80,7 +82,7 @@ int get_valid_gpio(int gpio)
 	int value = -EINVAL;
 
 	if (gpio_is_valid(gpio)) {
-		value = gpio_get_value(gpio);
+		value = gpio_get_value_cansleep(gpio);
 		pr_debug("%s: gpio %d value %d\n", __func__, gpio, value);
 	}
 	return value;
@@ -90,10 +92,10 @@ void gpio_set_ven(struct nfc_dev *nfc_dev, int value)
 {
 	struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
 
-	if (gpio_get_value(nfc_gpio->ven) != value) {
+	if (gpio_get_value_cansleep(nfc_gpio->ven) != value) {
 		pr_debug("%s: value %d\n", __func__, value);
 
-		gpio_set_value(nfc_gpio->ven, value);
+		gpio_set_value_cansleep(nfc_gpio->ven, value);
 		/* hardware dependent delay */
 		usleep_range(NFC_GPIO_SET_WAIT_TIME_US,
 			     NFC_GPIO_SET_WAIT_TIME_US + 100);
@@ -106,21 +108,28 @@ int configure_gpio(unsigned int gpio, int flag)
 
 	pr_debug("%s: nfc gpio [%d] flag [%01x]\n", __func__, gpio, flag);
 	if (gpio_is_valid(gpio)) {
+		TP();
 		ret = gpio_request(gpio, "nfc_gpio");
+		TP();
 		if (ret) {
 			pr_err("%s: unable to request nfc gpio [%d]\n",
 			       __func__, gpio);
 			return ret;
 		}
 		/* set direction and value for output pin */
+		TP();
 		if (flag & GPIO_OUTPUT) {
-			ret = gpio_direction_output(gpio, (GPIO_HIGH & flag));
+			TP();
+			ret = gpio_direction_output(gpio,
+						   !!(flag & GPIO_HIGH));
 			pr_debug("%s: nfc o/p gpio %d level %d\n", __func__,
-				 gpio, gpio_get_value(gpio));
+				 gpio, gpio_get_value_cansleep(gpio));
 		} else {
+			TP();
 			ret = gpio_direction_input(gpio);
 			pr_debug("%s: nfc i/p gpio %d\n", __func__, gpio);
 		}
+		TP();
 
 		if (ret) {
 			pr_err("%s: unable to set direction for nfc gpio [%d]\n",
@@ -128,9 +137,12 @@ int configure_gpio(unsigned int gpio, int flag)
 			gpio_free(gpio);
 			return ret;
 		}
+		TP();
 		/* Consider value as control for input IRQ pin */
 		if (flag & GPIO_IRQ) {
+			TP();
 			ret = gpio_to_irq(gpio);
+			TP();
 			if (ret < 0) {
 				pr_err("%s: unable to set irq [%d]\n", __func__,
 				       gpio);
@@ -145,6 +157,7 @@ int configure_gpio(unsigned int gpio, int flag)
 		pr_err("%s: invalid gpio\n", __func__);
 		ret = -EINVAL;
 	}
+	TP();
 	return ret;
 }
 
@@ -362,7 +375,7 @@ int validate_nfc_state_nci(struct nfc_dev *nfc_dev)
 {
 	struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
 
-	if (!gpio_get_value(nfc_gpio->ven)) {
+	if (!get_valid_gpio(nfc_gpio->ven)) {
 		pr_err("%s: ven low - nfcc powered off\n", __func__);
 		return -ENODEV;
 	}

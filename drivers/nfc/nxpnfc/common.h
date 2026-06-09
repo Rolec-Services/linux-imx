@@ -146,9 +146,9 @@ enum gpio_values {
 
 /* NFC GPIO variables */
 struct platform_gpio {
-	unsigned int irq;
-	unsigned int ven;
-	unsigned int dwl_req;
+	int irq;
+	int ven;
+	int dwl_req;
 };
 
 /* NFC Struct to get all the required configs from DTS */

@@ -43,6 +43,12 @@
 		serial5 = &lpuart6;
 		serial6 = &lpuart7;
 		serial7 = &lpuart8;
+		spi1 = &lpspi1;
+		spi2 = &lpspi2;
+		spi3 = &lpspi3;
+		spi4 = &lpspi4;
+		spi5 = &lpspi5;
+		spi6 = &lpspi6;
 	};
 
 
@@ -773,8 +779,10 @@
 	pcf2131: rtc@53 {
 		compatible = "nxp,pcf2131";
 		reg = <0x53>;
+		/* AM
 		interrupt-parent = <&pcal6524>;
 		interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
+		*/
 	};
 
 /* AM
@@ -821,7 +829,7 @@
 	nxpnfc@0 {
         compatible = "nxp,nxpnfc";
         reg = <0>; /* CS0 */
-        spi-max-frequency = <5000000>; /* start safe; tune as needed */
+        spi-max-frequency = <7000000>; /* start safe; tune as needed */
 
 		 /* muxing of IRQ pin */
         pinctrl-names = "default";
@@ -1174,7 +1182,7 @@
 
 	pinctrl_pn7161_irq: pn7161irqgrp {
 		fsl,pins = <
-			MX93_PAD_GPIO_IO10__GPIO2_IO10			0x1400
+			MX93_PAD_GPIO_IO10__GPIO2_IO10			0x31e
 		>;
 	};
 
