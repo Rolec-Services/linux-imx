@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 
-# The script is now an asyncio-based continuous NCI frame monitor in nxpnfc.py.
+# The script is a continuous NCI frame monitor in nxpnfc.py.
 #
 # What it now does:
 #
-# 1 .Opens /dev/nxpnfc in non-blocking mode.
+# 1 .Opens /dev/nxpnfc in blocking mode.
 # 2. Optionally powers on the NFCC at startup.
-# 3. Registers an async reader and continuously prints incoming frames with timestamp, frame counter, and length.
+# 3. Uses blocking reads and continuously prints incoming frames with timestamp, frame counter, and length.
 # 4. Handles Ctrl+C / SIGTERM cleanly.
 # 5. Optionally powers off on exit.
 # 6. Still supports optional one-time startup TX command via --cmd.
@@ -22,7 +22,6 @@
 # 3. Keep power state untouched:
 #   python3 nxpnfc.py --no-power-on --no-power-off
  
-import asyncio
 import argparse
 import ctypes
 import fcntl
@@ -74,39 +73,26 @@ def ts():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
-async def run_reader(args):
+def run_reader(args):
     fd = None
-    stop_event = asyncio.Event()
     frame_count = 0
+    stop_requested = False
 
-    def on_signal(*_):
-        stop_event.set()
-
-    def on_readable():
-        nonlocal frame_count
-        try:
-            rx = os.read(fd, args.read_len)
-        except BlockingIOError:
-            return
-        except OSError as e:
-            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
-                return
-            print(f"[{ts()}] Read error: {e}", file=sys.stderr)
-            stop_event.set()
-            return
-
-        if not rx:
-            print(f"[{ts()}] EOF from device, stopping.")
-            stop_event.set()
-            return
-
-        frame_count += 1
-        print(f"[{ts()}] RX[{frame_count}] len={len(rx)}: {rx.hex(' ')}")
-
-    loop = asyncio.get_running_loop()
+    def on_sigterm(*_):
+        nonlocal stop_requested
+        stop_requested = True
 
     try:
-        fd = os.open(args.dev, os.O_RDWR | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            fd = os.open(args.dev, os.O_RDWR | os.O_CLOEXEC)
+        except PermissionError:
+            print(
+                f"Permission denied opening {args.dev}. "
+                "Check file mode/owner/group/LSM policy.",
+                file=sys.stderr,
+            )
+            return 13
+
         print(f"[{ts()}] Opened {args.dev}")
 
         if not args.no_power_on:
@@ -118,21 +104,31 @@ async def run_reader(args):
             written = os.write(fd, tx)
             print(f"[{ts()}] TX len={written}: {tx.hex(' ')}")
 
-        loop.add_reader(fd, on_readable)
-
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, on_signal)
-            except NotImplementedError:
-                pass
+        signal.signal(signal.SIGTERM, on_sigterm)
 
         print(f"[{ts()}] Listening for incoming NCI frames. Press Ctrl+C to stop.")
-        await stop_event.wait()
+        while not stop_requested:
+            try:
+                rx = os.read(fd, args.read_len)
+            except InterruptedError:
+                if stop_requested:
+                    break
+                continue
+            except OSError as e:
+                if e.errno == errno.EINTR and stop_requested:
+                    break
+                print(f"[{ts()}] Read error: {e}", file=sys.stderr)
+                return 1
+
+            if not rx:
+                print(f"[{ts()}] EOF from device, stopping.")
+                break
+
+            frame_count += 1
+            print(f"[{ts()}] RX[{frame_count}] len={len(rx)}: {rx.hex(' ')}")
+
         return 0
 
-    except PermissionError:
-        print("Permission denied. Check udev/group for /dev/nxpnfc.", file=sys.stderr)
-        return 13
     except FileNotFoundError:
         print(f"Device not found: {args.dev}", file=sys.stderr)
         return 2
@@ -140,16 +136,13 @@ async def run_reader(args):
         print(f"Invalid --cmd: {e}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
+        print(f"[{ts()}] Interrupted, stopping.")
         return 0
     except OSError as e:
         print(f"OS error: {e}", file=sys.stderr)
         return 1
     finally:
         if fd is not None:
-            try:
-                loop.remove_reader(fd)
-            except Exception:
-                pass
             if not args.no_power_off:
                 try:
                     fcntl.ioctl(fd, NFC_SET_PWR, NFC_POWER_OFF)
@@ -176,7 +169,7 @@ def main():
     parser.add_argument("--no-power-on", action="store_true", help="do not send NFC_POWER_ON")
     parser.add_argument("--no-power-off", action="store_true", help="do not send NFC_POWER_OFF on exit")
     args = parser.parse_args()
-    return asyncio.run(run_reader(args))
+    return run_reader(args)
 
 
 if __name__ == "__main__":
