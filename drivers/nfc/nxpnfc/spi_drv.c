@@ -41,6 +41,13 @@
 
 #define TP() pr_debug("%s:%s:%d\n", __FILE__, __func__, __LINE__)
 
+static inline bool nfc_irq_asserted(struct nfc_dev *nfc_dev)
+{
+	int val = gpio_get_value(nfc_dev->configs.gpio.irq);
+
+	return nfc_dev->configs.gpio.irq_active_low ? !val : !!val;
+}
+
 /**
  * spi_disable_irq()
  *
@@ -154,14 +161,14 @@ int nfc_spi_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 	if (count > MAX_NCI_BUFFER_SIZE)
 		count = MAX_NCI_BUFFER_SIZE;
 
-	if (!gpio_get_value(nfc_gpio->irq)) {
+	if (!nfc_irq_asserted(nfc_dev)) {
 		while (1) {
 			ret = 0;
 			if (!spi_dev->irq_enabled) {
 				spi_dev->irq_enabled = true;
 				enable_irq(spi_dev->client->irq);
 			}
-			if (!gpio_get_value(nfc_gpio->irq)) {
+			if (!nfc_irq_asserted(nfc_dev)) {
 				if (timeout) {
 					ret = wait_event_interruptible_timeout(
 						nfc_dev->read_wq,
@@ -169,8 +176,11 @@ int nfc_spi_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 						msecs_to_jiffies(timeout));
 
 					if (ret <= 0) {
-						pr_err("%s: timeout error\n",
-						       __func__);
+						pr_err("%s: timeout error (irq_gpio=%d asserted=%d active_low=%d)\n",
+						       __func__,
+						       gpio_get_value(nfc_gpio->irq),
+						       nfc_irq_asserted(nfc_dev),
+						       nfc_gpio->irq_active_low);
 						goto err;
 					}
 				} else {
@@ -186,7 +196,7 @@ int nfc_spi_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 			}
 			spi_disable_irq(nfc_dev);
 
-			if (gpio_get_value(nfc_gpio->irq))
+			if (nfc_irq_asserted(nfc_dev))
 				break;
 			if (!gpio_get_value(nfc_gpio->ven)) {
 				pr_info("%s: releasing read\n", __func__);
@@ -233,7 +243,7 @@ int nfc_spi_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 	 * the host cmds resets NFCC during any parallel read operation
 	 */
 	for (retry_cnt = 1; retry_cnt <= MAX_WRITE_IRQ_COUNT; retry_cnt++) {
-		if (gpio_get_value(nfc_gpio->irq)) {
+		if (nfc_irq_asserted(nfc_dev)) {
 			pr_warn("%s: irq high during write, wait\n", __func__);
 			usleep_range(NFC_WRITE_IRQ_WAIT_TIME_US,
 				     NFC_WRITE_IRQ_WAIT_TIME_US + 100);
@@ -241,7 +251,7 @@ int nfc_spi_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 			break;
 		}
 		if (retry_cnt == MAX_WRITE_IRQ_COUNT &&
-			     gpio_get_value(nfc_gpio->irq)) {
+			     nfc_irq_asserted(nfc_dev)) {
 			pr_warn("%s: allow after maximum wait\n", __func__);
 		}
 	}
@@ -443,8 +453,9 @@ int nfc_spi_dev_probe(struct spi_device *client)
 	/* interrupt initializations */
 	pr_info("%s: requesting IRQ %d\n", __func__, client->irq);
 	spi_dev->irq_enabled = true;
-	ret = request_irq(client->irq, spi_irq_handler, IRQF_TRIGGER_HIGH,
-			  spi_dev->device.name, nfc_dev);
+	ret = request_irq(client->irq, spi_irq_handler,
+			  nfc_gpio->irq_active_low ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH,
+			  NFC_DEV_ID, nfc_dev);
 	if (ret) {
 		pr_err("%s: request_irq failed\n", __func__);
 		goto err_nfc_misc_unregister;

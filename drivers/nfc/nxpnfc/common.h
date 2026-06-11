@@ -149,6 +149,9 @@ struct platform_gpio {
 	int irq;
 	int ven;
 	int dwl_req;
+	bool irq_active_low;
+	bool ven_active_low;
+	bool dwl_req_active_low;
 };
 
 /* NFC Struct to get all the required configs from DTS */

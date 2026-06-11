@@ -20,6 +20,7 @@
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
 #include <linux/delay.h>
+#include <dt-bindings/gpio/gpio.h>
 
 #include "common.h"
 
@@ -30,6 +31,7 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 {
 	struct device_node *np = dev->of_node;
 	struct platform_gpio *nfc_gpio = &nfc_configs->gpio;
+	u32 gpio_cells[3] = {0};
 
 	if (!np) {
 		pr_err("%s: nfc of_node NULL\n", __func__);
@@ -39,6 +41,9 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 	nfc_gpio->irq = -EINVAL;
 	nfc_gpio->dwl_req = -EINVAL;
 	nfc_gpio->ven = -EINVAL;
+	nfc_gpio->irq_active_low = false;
+	nfc_gpio->ven_active_low = false;
+	nfc_gpio->dwl_req_active_low = false;
 
 	/* irq required for i2c based chips only */
 	if (interface == PLATFORM_IF_I2C || interface == PLATFORM_IF_SPI) {
@@ -48,6 +53,9 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 			       nfc_gpio->irq);
 			return -EINVAL;
 		}
+		if (!of_property_read_u32_array(np, DTS_IRQ_GPIO_STR, gpio_cells,
+						ARRAY_SIZE(gpio_cells)))
+			nfc_gpio->irq_active_low = !!(gpio_cells[2] & GPIO_ACTIVE_LOW);
 		pr_info("%s: irq %d\n", __func__, nfc_gpio->irq);
 	}
 	nfc_gpio->ven = of_get_named_gpio(np, DTS_VEN_GPIO_STR, 0);
@@ -55,14 +63,25 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 		pr_err("%s: ven gpio invalid %d\n", __func__, nfc_gpio->ven);
 		return -EINVAL;
 	}
+	if (!of_property_read_u32_array(np, DTS_VEN_GPIO_STR, gpio_cells,
+					ARRAY_SIZE(gpio_cells)))
+		nfc_gpio->ven_active_low = !!(gpio_cells[2] & GPIO_ACTIVE_LOW);
 	/* some products like sn220 does not required fw dwl pin */
 	nfc_gpio->dwl_req = of_get_named_gpio(np, DTS_FWDN_GPIO_STR, 0);
 	if ((!gpio_is_valid(nfc_gpio->dwl_req)))
 		pr_warn("%s: dwl_req gpio invalid %d\n", __func__,
 			nfc_gpio->dwl_req);
+	else if (!of_property_read_u32_array(np, DTS_FWDN_GPIO_STR, gpio_cells,
+					     ARRAY_SIZE(gpio_cells)))
+		nfc_gpio->dwl_req_active_low = !!(gpio_cells[2] & GPIO_ACTIVE_LOW);
 
-	pr_info("%s: %d, %d, %d\n", __func__, nfc_gpio->irq, nfc_gpio->ven,
-		nfc_gpio->dwl_req);
+	pr_info("%s: irq=%d(active_%s), ven=%d(active_%s), fw_dwl=%d(active_%s)\n",
+		__func__, nfc_gpio->irq,
+		nfc_gpio->irq_active_low ? "low" : "high",
+		nfc_gpio->ven,
+		nfc_gpio->ven_active_low ? "low" : "high",
+		nfc_gpio->dwl_req,
+		nfc_gpio->dwl_req_active_low ? "low" : "high");
 	return 0;
 }
 

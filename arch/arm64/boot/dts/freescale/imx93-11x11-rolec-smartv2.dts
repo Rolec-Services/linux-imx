@@ -835,7 +835,7 @@
         pinctrl-names = "default";
         pinctrl-0 = <&pinctrl_pn7161_irq>;
 
-        nxp,nxpnfc-irq = <&gpio2 10 GPIO_ACTIVE_HIGH>;
+        nxp,nxpnfc-irq = <&gpio2 10 GPIO_ACTIVE_LOW>;
         nxp,nxpnfc-ven = <&pcal6524 6 GPIO_ACTIVE_HIGH>;
         nxp,nxpnfc-fw-dwnld = <&pcal6524 22 GPIO_ACTIVE_HIGH>; /* optional */
 		status = "okay";
