@@ -18,6 +18,7 @@
  *
  ******************************************************************************/
 #include <linux/gpio.h>
+#include <linux/gpio/consumer.h>
 #include <linux/of_gpio.h>
 #include <linux/delay.h>
 #include <dt-bindings/gpio/gpio.h>
@@ -41,6 +42,9 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 	nfc_gpio->irq = -EINVAL;
 	nfc_gpio->dwl_req = -EINVAL;
 	nfc_gpio->ven = -EINVAL;
+	nfc_gpio->irq_desc = NULL;
+	nfc_gpio->ven_desc = NULL;
+	nfc_gpio->dwl_req_desc = NULL;
 	nfc_gpio->irq_active_low = false;
 	nfc_gpio->ven_active_low = false;
 	nfc_gpio->dwl_req_active_low = false;
@@ -50,6 +54,12 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 		nfc_gpio->irq = of_get_named_gpio(np, DTS_IRQ_GPIO_STR, 0);
 		if ((!gpio_is_valid(nfc_gpio->irq))) {
 			pr_err("%s: irq gpio invalid %d\n", __func__,
+			       nfc_gpio->irq);
+			return -EINVAL;
+		}
+		nfc_gpio->irq_desc = gpio_to_desc(nfc_gpio->irq);
+		if (!nfc_gpio->irq_desc) {
+			pr_err("%s: unable to get irq gpio desc %d\n", __func__,
 			       nfc_gpio->irq);
 			return -EINVAL;
 		}
@@ -63,6 +73,12 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 		pr_err("%s: ven gpio invalid %d\n", __func__, nfc_gpio->ven);
 		return -EINVAL;
 	}
+	nfc_gpio->ven_desc = gpio_to_desc(nfc_gpio->ven);
+	if (!nfc_gpio->ven_desc) {
+		pr_err("%s: unable to get ven gpio desc %d\n", __func__,
+		       nfc_gpio->ven);
+		return -EINVAL;
+	}
 	if (!of_property_read_u32_array(np, DTS_VEN_GPIO_STR, gpio_cells,
 					ARRAY_SIZE(gpio_cells)))
 		nfc_gpio->ven_active_low = !!(gpio_cells[2] & GPIO_ACTIVE_LOW);
@@ -71,9 +87,17 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 	if ((!gpio_is_valid(nfc_gpio->dwl_req)))
 		pr_warn("%s: dwl_req gpio invalid %d\n", __func__,
 			nfc_gpio->dwl_req);
-	else if (!of_property_read_u32_array(np, DTS_FWDN_GPIO_STR, gpio_cells,
-					     ARRAY_SIZE(gpio_cells)))
-		nfc_gpio->dwl_req_active_low = !!(gpio_cells[2] & GPIO_ACTIVE_LOW);
+	else {
+		nfc_gpio->dwl_req_desc = gpio_to_desc(nfc_gpio->dwl_req);
+		if (!nfc_gpio->dwl_req_desc) {
+			pr_err("%s: unable to get fw_dwl gpio desc %d\n", __func__,
+			       nfc_gpio->dwl_req);
+			return -EINVAL;
+		}
+		if (!of_property_read_u32_array(np, DTS_FWDN_GPIO_STR, gpio_cells,
+						     ARRAY_SIZE(gpio_cells)))
+			nfc_gpio->dwl_req_active_low = !!(gpio_cells[2] & GPIO_ACTIVE_LOW);
+	}
 
 	pr_info("%s: irq=%d(active_%s), ven=%d(active_%s), fw_dwl=%d(active_%s)\n",
 		__func__, nfc_gpio->irq,
@@ -87,9 +111,14 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 
 void set_valid_gpio(int gpio, int value)
 {
+	struct gpio_desc *desc;
+
 	if (gpio_is_valid(gpio)) {
+		desc = gpio_to_desc(gpio);
+		if (!desc)
+			return;
 		pr_debug("%s: gpio %d value %d\n", __func__, gpio, value);
-		gpio_set_value_cansleep(gpio, value);
+		gpiod_set_value_cansleep(desc, value);
 		/* hardware dependent delay */
 		usleep_range(NFC_GPIO_SET_WAIT_TIME_US,
 			     NFC_GPIO_SET_WAIT_TIME_US + 100);
@@ -99,9 +128,13 @@ void set_valid_gpio(int gpio, int value)
 int get_valid_gpio(int gpio)
 {
 	int value = -EINVAL;
+	struct gpio_desc *desc;
 
 	if (gpio_is_valid(gpio)) {
-		value = gpio_get_value_cansleep(gpio);
+		desc = gpio_to_desc(gpio);
+		if (!desc)
+			return -EINVAL;
+		value = gpiod_get_value_cansleep(desc);
 		pr_debug("%s: gpio %d value %d\n", __func__, gpio, value);
 	}
 	return value;
@@ -110,11 +143,15 @@ int get_valid_gpio(int gpio)
 void gpio_set_ven(struct nfc_dev *nfc_dev, int value)
 {
 	struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
+	struct gpio_desc *ven_desc = nfc_gpio->ven_desc;
 
-	if (gpio_get_value_cansleep(nfc_gpio->ven) != value) {
+	if (!ven_desc)
+		return;
+
+	if (gpiod_get_value_cansleep(ven_desc) != value) {
 		pr_debug("%s: value %d\n", __func__, value);
 
-		gpio_set_value_cansleep(nfc_gpio->ven, value);
+		gpiod_set_value_cansleep(ven_desc, value);
 		/* hardware dependent delay */
 		usleep_range(NFC_GPIO_SET_WAIT_TIME_US,
 			     NFC_GPIO_SET_WAIT_TIME_US + 100);
@@ -124,9 +161,24 @@ void gpio_set_ven(struct nfc_dev *nfc_dev, int value)
 int configure_gpio(unsigned int gpio, int flag)
 {
 	int ret;
+	int want_active_low;
+	struct gpio_desc *desc;
 
 	pr_debug("%s: nfc gpio [%d] flag [%01x]\n", __func__, gpio, flag);
 	if (gpio_is_valid(gpio)) {
+		desc = gpio_to_desc(gpio);
+		if (!desc) {
+			pr_err("%s: invalid gpio desc for gpio [%d]\n",
+			       __func__, gpio);
+			return -EINVAL;
+		}
+
+		if (flag & GPIO_IRQ) {
+			want_active_low = !!(flag & GPIO_ACTIVE_LOW_CFG);
+
+			if (!!gpiod_is_active_low(desc) != want_active_low)
+				gpiod_toggle_active_low(desc);
+		}
 		TP();
 		ret = gpio_request(gpio, "nfc_gpio");
 		TP();
@@ -139,13 +191,12 @@ int configure_gpio(unsigned int gpio, int flag)
 		TP();
 		if (flag & GPIO_OUTPUT) {
 			TP();
-			ret = gpio_direction_output(gpio,
-						   !!(flag & GPIO_HIGH));
+			ret = gpiod_direction_output(desc, !!(flag & GPIO_HIGH));
 			pr_debug("%s: nfc o/p gpio %d level %d\n", __func__,
-				 gpio, gpio_get_value_cansleep(gpio));
+				 gpio, gpiod_get_value_cansleep(desc));
 		} else {
 			TP();
-			ret = gpio_direction_input(gpio);
+			ret = gpiod_direction_input(desc);
 			pr_debug("%s: nfc i/p gpio %d\n", __func__, gpio);
 		}
 		TP();
@@ -160,7 +211,7 @@ int configure_gpio(unsigned int gpio, int flag)
 		/* Consider value as control for input IRQ pin */
 		if (flag & GPIO_IRQ) {
 			TP();
-			ret = gpio_to_irq(gpio);
+			ret = gpiod_to_irq(desc);
 			TP();
 			if (ret < 0) {
 				pr_err("%s: unable to set irq [%d]\n", __func__,
@@ -419,6 +470,8 @@ EXPORT_SYMBOL_GPL(nfc_dev_open);
 EXPORT_SYMBOL_GPL(nfc_dev_close);
 EXPORT_SYMBOL_GPL(nfc_dev_ioctl);
 EXPORT_SYMBOL_GPL(validate_nfc_state_nci);
+EXPORT_SYMBOL_GPL(set_valid_gpio);
+EXPORT_SYMBOL_GPL(get_valid_gpio);
 
 MODULE_DESCRIPTION("NXP NFC PN71xx/SNxxx driver");
 MODULE_LICENSE("GPL v2");

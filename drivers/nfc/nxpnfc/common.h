@@ -22,6 +22,8 @@
 
 #include <linux/cdev.h>
 
+struct gpio_desc;
+
 struct spi_dev;
 
 #if IS_ENABLED(CONFIG_NXP_NFC_I2C)
@@ -142,6 +144,7 @@ enum gpio_values {
 	GPIO_HIGH = 0x2,
 	GPIO_OUTPUT_HIGH = 0x3,
 	GPIO_IRQ = 0x4,
+	GPIO_ACTIVE_LOW_CFG = 0x8,
 };
 
 /* NFC GPIO variables */
@@ -149,6 +152,9 @@ struct platform_gpio {
 	int irq;
 	int ven;
 	int dwl_req;
+	struct gpio_desc *irq_desc;
+	struct gpio_desc *ven_desc;
+	struct gpio_desc *dwl_req_desc;
 	bool irq_active_low;
 	bool ven_active_low;
 	bool dwl_req_active_low;

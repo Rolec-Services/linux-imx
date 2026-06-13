@@ -43,7 +43,8 @@
 
 static inline bool nfc_irq_asserted(struct nfc_dev *nfc_dev)
 {
-	int val = gpio_get_value(nfc_dev->configs.gpio.irq);
+	int val = get_valid_gpio(nfc_dev->configs.gpio.irq);
+	pr_debug("%s: irq gpio value %d, assertion=%d\n", __func__, val, nfc_dev->configs.gpio.irq_active_low ? !val : !!val);
 
 	return nfc_dev->configs.gpio.irq_active_low ? !val : !!val;
 }
@@ -89,6 +90,18 @@ int spi_enable_irq(struct nfc_dev *dev)
 	}
 	spin_unlock_irqrestore(&dev->spi_dev.irq_enabled_lock, flags);
 	return 0;
+}
+
+static bool spi_is_irq_enabled(struct nfc_dev *dev)
+{
+	unsigned long flags;
+	bool enabled;
+
+	spin_lock_irqsave(&dev->spi_dev.irq_enabled_lock, flags);
+	enabled = dev->spi_dev.irq_enabled;
+	spin_unlock_irqrestore(&dev->spi_dev.irq_enabled_lock, flags);
+
+	return enabled;
 }
 
 /**
@@ -155,8 +168,10 @@ int nfc_spi_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 
 	pr_debug("%s: reading %zu bytes.\n", __func__, count);
 
+	#if AM
 	if (timeout > NCI_CMD_RSP_TIMEOUT_MS)
 		timeout = NCI_CMD_RSP_TIMEOUT_MS;
+	#endif // AM
 
 	if (count > MAX_NCI_BUFFER_SIZE)
 		count = MAX_NCI_BUFFER_SIZE;
@@ -164,41 +179,58 @@ int nfc_spi_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 	if (!nfc_irq_asserted(nfc_dev)) {
 		while (1) {
 			ret = 0;
-			if (!spi_dev->irq_enabled) {
-				spi_dev->irq_enabled = true;
-				enable_irq(spi_dev->client->irq);
+			TP();
+			if (!spi_is_irq_enabled(nfc_dev)) {
+				TP();
+				spi_enable_irq(nfc_dev);
+				TP();
 			}
+			TP();
 			if (!nfc_irq_asserted(nfc_dev)) {
+				TP();
 				if (timeout) {
+					TP();
 					ret = wait_event_interruptible_timeout(
 						nfc_dev->read_wq,
-						!spi_dev->irq_enabled,
+						nfc_irq_asserted(nfc_dev),
 						msecs_to_jiffies(timeout));
+					TP();
 
-					if (ret <= 0) {
+					if (ret == 0) {
 						pr_err("%s: timeout error (irq_gpio=%d asserted=%d active_low=%d)\n",
 						       __func__,
-						       gpio_get_value(nfc_gpio->irq),
+						       get_valid_gpio(nfc_gpio->irq),
 						       nfc_irq_asserted(nfc_dev),
 						       nfc_gpio->irq_active_low);
 						goto err;
 					}
-				} else {
-					ret = wait_event_interruptible(
-						nfc_dev->read_wq,
-						!spi_dev->irq_enabled);
-					if (ret) {
-						pr_err("%s: err wakeup of wq\n",
-						       __func__);
+					if (ret < 0) {
+						pr_err("%s: wait interrupted ret %d\n", __func__, ret);
 						goto err;
 					}
+					TP();
+				} else {
+					TP();
+					ret = wait_event_interruptible(
+						nfc_dev->read_wq,
+						nfc_irq_asserted(nfc_dev));
+					TP();
+					if (ret) {
+						pr_err("%s: err wakeup of wq ret %d\n", __func__, ret);
+						goto err;
+					}
+					TP();
 				}
+				TP();
 			}
+			TP();
 			spi_disable_irq(nfc_dev);
+			TP();
 
 			if (nfc_irq_asserted(nfc_dev))
 				break;
-			if (!gpio_get_value(nfc_gpio->ven)) {
+			TP();
+			if (!get_valid_gpio(nfc_gpio->ven)) {
 				pr_info("%s: releasing read\n", __func__);
 				ret = -EIO;
 				goto err;
@@ -228,7 +260,7 @@ int nfc_spi_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 {
 	int ret = -EINVAL;
 	int retry_cnt;
-	struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
+	//struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
 
 	if (count <= 0)
 		return ret;
@@ -421,7 +453,8 @@ int nfc_spi_dev_probe(struct spi_device *client)
 		       nfc_gpio->ven);
 		goto err_free_tmp_read_kbuf;
 	}
-	ret = configure_gpio(nfc_gpio->irq, GPIO_IRQ);
+	ret = configure_gpio(nfc_gpio->irq, GPIO_IRQ |
+			     (nfc_gpio->irq_active_low ? GPIO_ACTIVE_LOW_CFG : 0));
 	if (ret <= 0) {
 		pr_err("%s: unable to request nfc irq gpio [%d]\n", __func__,
 		       nfc_gpio->irq);

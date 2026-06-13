@@ -43,6 +43,13 @@
 
 #include "common.h"
 
+static inline bool i2c_irq_asserted(struct nfc_dev *nfc_dev)
+{
+	int val = get_valid_gpio(nfc_dev->configs.gpio.irq);
+
+	return nfc_dev->configs.gpio.irq_active_low ? !val : !!val;
+}
+
 /**
  * i2c_disable_irq()
  *
@@ -115,14 +122,14 @@ int i2c_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 	if (count > MAX_NCI_BUFFER_SIZE)
 		count = MAX_NCI_BUFFER_SIZE;
 
-	if (!gpio_get_value(nfc_gpio->irq)) {
+	if (!i2c_irq_asserted(nfc_dev)) {
 		while (1) {
 			ret = 0;
 			if (!i2c_dev->irq_enabled) {
 				i2c_dev->irq_enabled = true;
 				enable_irq(i2c_dev->client->irq);
 			}
-			if (!gpio_get_value(nfc_gpio->irq)) {
+			if (!i2c_irq_asserted(nfc_dev)) {
 				if (timeout) {
 					ret = wait_event_interruptible_timeout(
 						nfc_dev->read_wq,
@@ -147,9 +154,9 @@ int i2c_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 			}
 			i2c_disable_irq(nfc_dev);
 
-			if (gpio_get_value(nfc_gpio->irq))
+			if (i2c_irq_asserted(nfc_dev))
 				break;
-			if (!gpio_get_value(nfc_gpio->ven)) {
+			if (!get_valid_gpio(nfc_gpio->ven)) {
 				pr_info("%s: releasing read\n", __func__);
 				ret = -EIO;
 				goto err;
@@ -186,7 +193,7 @@ int i2c_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 	 * the host cmds resets NFCC during any parallel read operation
 	 */
 	for (retry_cnt = 1; retry_cnt <= MAX_WRITE_IRQ_COUNT; retry_cnt++) {
-		if (gpio_get_value(nfc_gpio->irq)) {
+		if (i2c_irq_asserted(nfc_dev)) {
 			pr_warn("%s: irq high during write, wait\n", __func__);
 			usleep_range(NFC_WRITE_IRQ_WAIT_TIME_US,
 				     NFC_WRITE_IRQ_WAIT_TIME_US + 100);
@@ -194,7 +201,7 @@ int i2c_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 			break;
 		}
 		if (retry_cnt == MAX_WRITE_IRQ_COUNT &&
-			     gpio_get_value(nfc_gpio->irq)) {
+			     i2c_irq_asserted(nfc_dev)) {
 			pr_warn("%s: allow after maximum wait\n", __func__);
 		}
 	}
@@ -317,7 +324,8 @@ int nfc_i2c_dev_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		       nfc_gpio->ven);
 		goto err_free_write_kbuf;
 	}
-	ret = configure_gpio(nfc_gpio->irq, GPIO_IRQ);
+	ret = configure_gpio(nfc_gpio->irq, GPIO_IRQ |
+			     (nfc_gpio->irq_active_low ? GPIO_ACTIVE_LOW_CFG : 0));
 	if (ret <= 0) {
 		pr_err("%s: unable to request nfc irq gpio [%d]\n", __func__,
 		       nfc_gpio->irq);
@@ -349,7 +357,8 @@ int nfc_i2c_dev_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	/* interrupt initializations */
 	pr_info("%s: requesting IRQ %d\n", __func__, client->irq);
 	i2c_dev->irq_enabled = true;
-	ret = request_irq(client->irq, i2c_irq_handler, IRQF_TRIGGER_HIGH,
+	ret = request_irq(client->irq, i2c_irq_handler,
+			  nfc_gpio->irq_active_low ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH,
 			  client->name, nfc_dev);
 	if (ret) {
 		pr_err("%s: request_irq failed\n", __func__);
