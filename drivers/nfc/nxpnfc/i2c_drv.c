@@ -194,7 +194,7 @@ int i2c_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 	 */
 	for (retry_cnt = 1; retry_cnt <= MAX_WRITE_IRQ_COUNT; retry_cnt++) {
 		if (i2c_irq_asserted(nfc_dev)) {
-			pr_warn("%s: irq high during write, wait\n", __func__);
+			pr_debug("%s: irq asserted during write, wait\n", __func__);
 			usleep_range(NFC_WRITE_IRQ_WAIT_TIME_US,
 				     NFC_WRITE_IRQ_WAIT_TIME_US + 100);
 		} else {
@@ -202,7 +202,8 @@ int i2c_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 		}
 		if (retry_cnt == MAX_WRITE_IRQ_COUNT &&
 			     i2c_irq_asserted(nfc_dev)) {
-			pr_warn("%s: allow after maximum wait\n", __func__);
+			pr_debug("%s: proceeding after maximum wait with irq asserted\n",
+				 __func__);
 		}
 	}
 

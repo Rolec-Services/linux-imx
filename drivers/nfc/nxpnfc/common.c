@@ -383,11 +383,10 @@ long nfc_dev_ioctl(struct file *pfile, unsigned int cmd, unsigned long arg)
 	if (!nfc_dev)
 		return -ENODEV;
 
-	pr_debug("%s: cmd = %x arg = %zx\n", __func__, cmd, arg);
 	if( cmd == NFC_SET_PWR ){
 		ret = nfc_ioctl_power_states(nfc_dev, arg);
 	} else {
-		pr_err("%s: bad cmd %lu\n", __func__, arg);
+		pr_err("%s: bad cmd = %x , expectd %x, arg = %zx\n", __func__, cmd, NFC_SET_PWR, arg);
 		ret = -ENOIOCTLCMD;
 	}
 	return ret;

@@ -44,9 +44,12 @@
 static inline bool nfc_irq_asserted(struct nfc_dev *nfc_dev)
 {
 	int val = get_valid_gpio(nfc_dev->configs.gpio.irq);
-	pr_debug("%s: irq gpio value %d, assertion=%d\n", __func__, val, nfc_dev->configs.gpio.irq_active_low ? !val : !!val);
-
-	return nfc_dev->configs.gpio.irq_active_low ? !val : !!val;
+	
+	/*
+	 * get_valid_gpio() uses gpiod_get_value_cansleep(), which already returns
+	 * logical value (active state), so do not invert again for active-low.
+	 */
+	return !!val;
 }
 
 /**
@@ -261,12 +264,18 @@ int nfc_spi_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 	int ret = -EINVAL;
 	int retry_cnt;
 	//struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
-
-	if (count <= 0)
+	TP();
+	if (count <= 0) {
+		TP();
 		return ret;
+	}
 
-	if (count > MAX_DL_BUFFER_SIZE + PREFIX_LENGTH)
+	TP();
+
+	if (count > MAX_DL_BUFFER_SIZE + PREFIX_LENGTH) {
+		TP();
 		count = MAX_DL_BUFFER_SIZE + PREFIX_LENGTH;
+	}
 
 	pr_debug("%s: writing %zu bytes.\n", __func__, count);
 	/*
@@ -275,18 +284,25 @@ int nfc_spi_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 	 * the host cmds resets NFCC during any parallel read operation
 	 */
 	for (retry_cnt = 1; retry_cnt <= MAX_WRITE_IRQ_COUNT; retry_cnt++) {
+		TP();
 		if (nfc_irq_asserted(nfc_dev)) {
-			pr_warn("%s: irq high during write, wait\n", __func__);
+			TP();
+			pr_debug("%s: irq asserted during write, wait\n", __func__);
 			usleep_range(NFC_WRITE_IRQ_WAIT_TIME_US,
 				     NFC_WRITE_IRQ_WAIT_TIME_US + 100);
 		} else {
+			TP();
 			break;
 		}
+		TP();
 		if (retry_cnt == MAX_WRITE_IRQ_COUNT &&
-			     nfc_irq_asserted(nfc_dev)) {
-			pr_warn("%s: allow after maximum wait\n", __func__);
+		    nfc_irq_asserted(nfc_dev)) {
+			TP();
+			pr_debug( "%s: proceeding after maximum wait with irq asserted\n",
+				 __func__);
 		}
 	}
+	TP();
 	for (retry_cnt = 1; retry_cnt <= max_retry_cnt; retry_cnt++) {
 		struct spi_transfer transfer = {
 			.tx_buf = buf,
@@ -294,31 +310,47 @@ int nfc_spi_write(struct nfc_dev *nfc_dev, const char *buf, size_t count,
 			.len = count,
 		};
 		struct spi_message message;
+		TP();
 
 		spi_message_init(&message);
 		spi_message_add_tail(&transfer, &message);
 		ret = spi_sync(nfc_dev->spi_dev.client, &message);
+		pr_debug("%s: spi_sync returned %d\n", __func__, ret);
+		TP();
+
+		// print tmp_read_kbuf for debugging
+		pr_debug("%s: tmp_read_kbuf = [0x%02x,0x%02x,0x%02x..], ret = %d, retry_cnt = %d\n", __func__,
+				nfc_dev->spi_dev.tmp_read_kbuf[0], 
+				nfc_dev->spi_dev.tmp_read_kbuf[1],
+				nfc_dev->spi_dev.tmp_read_kbuf[2],
+				ret, retry_cnt);
 
 		// Checking for the first read byte is 0xFF
 		if ((nfc_dev->spi_dev.tmp_read_kbuf[0] ==
 		     MISO_VAL_ON_WRITE_SUCCESS) &&
 		    (ret == 0)) {
+			TP();
 			count = count - PREFIX_LENGTH;
 			break;
 		}
+		TP();
 		if ((nfc_dev->spi_dev.tmp_read_kbuf[0] !=
 		     MISO_VAL_ON_WRITE_SUCCESS) &&
 		    (retry_cnt >= max_retry_cnt)) {
+				TP();
 			pr_debug("%s, Write failed returning -1 ", __func__);
 			return 0;
 		} else if (ret <= 0 && (nfc_dev->spi_dev.tmp_read_kbuf[0] !=
 					MISO_VAL_ON_WRITE_SUCCESS)) {
+			TP();
 			pr_warn("%s: write failed ret(%d), maybe in standby\n",
 				__func__, ret);
 			usleep_range(WRITE_RETRY_WAIT_TIME_US,
 				     WRITE_RETRY_WAIT_TIME_US + 100);
 		}
+		TP();
 	}
+	pr_debug("%s: write completed successfully, count = %zu\n", __func__, count);
 	return count;
 }
 

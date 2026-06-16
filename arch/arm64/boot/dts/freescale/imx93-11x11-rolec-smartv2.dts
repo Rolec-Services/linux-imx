@@ -829,13 +829,14 @@
 	nxpnfc@0 {
         compatible = "nxp,nxpnfc";
         reg = <0>; /* CS0 */
-        spi-max-frequency = <7000000>; /* start safe; tune as needed */
+        //spi-max-frequency = <7000000>; /* start safe; tune as needed */
+        spi-max-frequency = <1000000>; /* start safe; tune as needed */
 
 		 /* muxing of IRQ pin */
         pinctrl-names = "default";
         pinctrl-0 = <&pinctrl_pn7161_irq>;
 
-        nxp,nxpnfc-irq = <&gpio2 10 GPIO_ACTIVE_LOW>;
+        nxp,nxpnfc-irq = <&gpio2 10 GPIO_ACTIVE_HIGH>;
         nxp,nxpnfc-ven = <&pcal6524 6 GPIO_ACTIVE_HIGH>;
         nxp,nxpnfc-fw-dwnld = <&pcal6524 22 GPIO_ACTIVE_HIGH>; /* optional */
 		status = "okay";
