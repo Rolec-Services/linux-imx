@@ -38,6 +38,7 @@
 
 #include "spi_drv.h"
 #include "common.h"
+#include <linux/poll.h>
 
 #define TP() pr_debug("%s:%s:%d\n", __FILE__, __func__, __LINE__)
 
@@ -398,11 +399,31 @@ ssize_t nfc_spi_dev_write(struct file *filp, const char __user *buf,
 	return ret;
 }
 
+static __poll_t nfc_spi_dev_poll(struct file *filp, poll_table *wait)
+{
+	struct nfc_dev *nfc_dev = (struct nfc_dev *)filp->private_data;
+	__poll_t mask = 0;
+
+	poll_wait(filp, &nfc_dev->read_wq, wait);
+
+	if (!get_valid_gpio(nfc_dev->configs.gpio.ven))
+		return POLLERR | POLLHUP;
+
+	if (nfc_irq_asserted(nfc_dev)) {
+		mask |= POLLIN | POLLRDNORM;
+	} else if (!spi_is_irq_enabled(nfc_dev)) {
+		spi_enable_irq(nfc_dev);
+	}
+
+	return mask;
+}
+
 static const struct file_operations nfc_spi_dev_fops = {
 	.owner = THIS_MODULE,
 	.llseek = NULL,
 	.read = nfc_spi_dev_read,
 	.write = nfc_spi_dev_write,
+	.poll = nfc_spi_dev_poll,
 	.open = nfc_dev_open,
 	.release = nfc_dev_close,
 	.unlocked_ioctl = nfc_dev_ioctl,
