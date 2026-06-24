@@ -49,11 +49,13 @@
 		spi4 = &lpspi4;
 		spi5 = &lpspi5;
 		spi6 = &lpspi6;
+		spi7 = &lpspi7;
+		spi8 = &lpspi8;
 	};
-
 
 	chosen {
 		stdout-path = &lpuart1;
+		bootargs = "console=ttyLP0,115200 earlycon";
 	};
 
 	dmic: dmic {
@@ -518,6 +520,33 @@
     };
 };
 
+// AM remove comments to enabl e the PWM signals on SPI6 pins for the rolec smartv2 board
+//&{/} {
+//	sw_pmw_spi6_sck: pwm-spi6-sck {
+//		compatible = "pwm-gpio";
+//		#pwm-cells = <3>;
+//		pinctrl-names = "default";
+//		pinctrl-0 = <&pinctrl_spi6_pwm>;
+//		gpios = <&gpio2 3 GPIO_ACTIVE_HIGH>;
+//		status = "okay";
+//	};
+//
+//	sw_pmw_spi6_pcs0: pwm-spi6-pcs0 {
+//		compatible = "pwm-gpio";
+//		#pwm-cells = <3>;
+//		gpios = <&gpio2 0 GPIO_ACTIVE_HIGH>;
+//		/* pinctrl omitted as it is already configured in the pwm-spi6-sck node */
+//		status = "okay";
+//	};
+//
+//	sw_pmw_spi6_sout: pwm-spi6-sout {
+//		compatible = "pwm-gpio";
+//		#pwm-cells = <3>;
+//		gpios = <&gpio2 2 GPIO_ACTIVE_HIGH>;
+//		status = "okay";
+//	};
+//};
+
 &lpi2c2 {
 	clock-frequency = <400000>;
 	pinctrl-names = "default", "sleep";
@@ -804,6 +833,7 @@
 &lpuart1 { /* console */
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_uart1>;
+	current-speed = <115200>;
 	status = "okay";
 };
 
@@ -824,24 +854,35 @@
 &lpspi6 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_lpspi6>;
+	cs-gpios = <&gpio2 0 GPIO_ACTIVE_LOW>; /* Controls MX93_PAD_GPIO_IO00 */
 	status = "okay";
 
 	nxpnfc@0 {
-        compatible = "nxp,nxpnfc";
-        reg = <0>; /* CS0 */
-        //spi-max-frequency = <7000000>; /* start safe; tune as needed */
-        spi-max-frequency = <1000000>; /* start safe; tune as needed */
+       compatible = "nxp,nxpnfc";
+       reg = <0>; /* CS0 */
+       //spi-max-frequency = <7000000>; /* start safe; tune as needed */
+       spi-max-frequency = <1000000>; /* start safe; tune as needed */
 
-		 /* muxing of IRQ pin */
-        pinctrl-names = "default";
-        pinctrl-0 = <&pinctrl_pn7161_irq>;
+       /* muxing of IRQ pin */
+       pinctrl-names = "default";
+       pinctrl-0 = <&pinctrl_pn7161_irq>;
 
-        nxp,nxpnfc-irq = <&gpio2 10 GPIO_ACTIVE_HIGH>;
-        nxp,nxpnfc-ven = <&pcal6524 6 GPIO_ACTIVE_HIGH>;
-        nxp,nxpnfc-fw-dwnld = <&pcal6524 22 GPIO_ACTIVE_HIGH>; /* optional */
-		status = "okay";
-    };
+       nxp,nxpnfc-irq = <&gpio2 10 GPIO_ACTIVE_HIGH>; /* optional */
+       nxp,nxpnfc-ven = <&pcal6524 6 GPIO_ACTIVE_HIGH>;
+       nxp,nxpnfc-fw-dwnld = <&pcal6524 22 GPIO_ACTIVE_HIGH>; /* optional */
+        status = "okay";
+   };
+
+    // AM: Remove comments to enable the /dev/spidev6.0
+	//spidev0: spidev@0 {
+	//	/* spidev.c rejects plain "spidev" in DT; use a whitelisted compatible */
+	//	compatible = "rohm,dh2228fv";
+	//	reg = <0>; /* CS0 */
+	//	spi-max-frequency = <1000000>; /* start safe; tune as needed */
+	//	status = "okay";
+	//};
 };
+
 
 /* AM
 &lpuart5 {
@@ -1174,10 +1215,10 @@
 
 	pinctrl_lpspi6: lpspi6grp {
 		fsl,pins = <
-			MX93_PAD_GPIO_IO00__LPSPI6_PCS0			0x011e
-			MX93_PAD_GPIO_IO01__LPSPI6_SIN			0x1400
-			MX93_PAD_GPIO_IO02__LPSPI6_SOUT			0x051e
-			MX93_PAD_GPIO_IO03__LPSPI6_SCK			0x051e
+			MX93_PAD_GPIO_IO00__GPIO2_IO00   0x39e  /* Software Chip Select (GPIO) */
+			MX93_PAD_GPIO_IO01__LPSPI6_SIN   0x39e  /* MISO: Pull-up enabled, Input */
+			MX93_PAD_GPIO_IO02__LPSPI6_SOUT  0x39e  /* MOSI: Push-Pull Output */
+			MX93_PAD_GPIO_IO03__LPSPI6_SCK   0x39e  /* SCLK: SPI Clock Output */
 		>;
 	};
 
@@ -1186,6 +1227,17 @@
 			MX93_PAD_GPIO_IO10__GPIO2_IO10			0x31e
 		>;
 	};
+
+// AM Remove comments below to enable SPI6 PWM for PN7161 NFC
+//pinctrl_spi6_pwm: spi6pwmgrp {
+//		fsl,pins = <
+//			MX93_PAD_GPIO_IO03__GPIO2_IO03 0x31e     /* SCK */
+//			MX93_PAD_GPIO_IO02__GPIO2_IO02 0x31e	 /* SOUT */
+//			/* MX93_PAD_GPIO_IO01__GPIO2_IO01 0x31e	 SIN */
+//			MX93_PAD_GPIO_IO00__GPIO2_IO00 0x31e	 /* PCS0 */
+//		>;
+//};
+
 
 	pinctrl_pcal6524: pcal6524grp {
 		fsl,pins = <
@@ -1231,6 +1283,7 @@
 		>;
 	};
 */
+
 
 	/* need to config the SION for data and cmd pad, refer to ERR052021 */
 	pinctrl_usdhc1: usdhc1grp {
