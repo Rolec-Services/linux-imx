@@ -549,8 +549,6 @@ int nfc_spi_dev_probe(struct spi_device *client)
 	TP();
 	spi_disable_irq(nfc_dev);
 	TP();
-	gpio_set_ven(nfc_dev, 1);
-	TP();
 	gpio_set_ven(nfc_dev, 0);
 	TP();
 	gpio_set_ven(nfc_dev, 1);
