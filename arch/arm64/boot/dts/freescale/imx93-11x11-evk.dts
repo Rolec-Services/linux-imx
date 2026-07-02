@@ -740,6 +740,39 @@
 	};
 };
 
+&lpspi6 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lpspi6>;
+	cs-gpios = <&gpio2 0 GPIO_ACTIVE_LOW>; /* Controls MX93_PAD_GPIO_IO00 */
+	status = "okay";
+
+	nxpnfc@0 {
+       compatible = "nxp,nxpnfc";
+       reg = <0>; /* CS0 */
+       //spi-max-frequency = <7000000>; /* start safe; tune as needed */
+       spi-max-frequency = <1000000>; /* start safe; tune as needed */
+
+       /* muxing of IRQ pin */
+       pinctrl-names = "default";
+       pinctrl-0 = <&pinctrl_pn7161_irq>;
+
+       nxp,nxpnfc-irq = <&gpio2 9 GPIO_ACTIVE_HIGH>; /* IRQ, pin 21   */
+       nxp,nxpnfc-ven = <&gpio2 10 GPIO_ACTIVE_HIGH>;/* VEN, pin 19   */
+       nxp,nxpnfc-fw-dwnld = <&gpio2 11 GPIO_ACTIVE_HIGH>; /* FW_DWNLD, pin 23   */
+       status = "okay";
+   };
+
+    // AM: Remove comments to enable the /dev/spidev6.0
+	//spidev0: spidev@0 {
+	//	/* spidev.c rejects plain "spidev" in DT; use a whitelisted compatible */
+	//	compatible = "rohm,dh2228fv";
+	//	reg = <0>; /* CS0 */
+	//	spi-max-frequency = <1000000>; /* start safe; tune as needed */
+	//	status = "okay";
+	//};
+};
+
+
 &media_blk_ctrl {
 	status = "okay";
 };
@@ -1267,6 +1300,24 @@
 			MX93_PAD_WDOG_ANY__WDOG1_WDOG_ANY	0x31e
 		>;
 	};
+
+	pinctrl_lpspi6: lpspi6grp {
+		fsl,pins = <
+			MX93_PAD_GPIO_IO00__GPIO2_IO00   0x39e  /* Software CS (GPIO), pin 27 */
+			MX93_PAD_GPIO_IO01__LPSPI6_SIN   0x39e  /* MISO: Pull-up enabled, Input, pin 28 */
+			MX93_PAD_GPIO_IO02__LPSPI6_SOUT  0x39e  /* MOSI: Push-Pull Output, pin 3 */
+			MX93_PAD_GPIO_IO03__LPSPI6_SCK   0x39e  /* SCLK: SPI Clock Output, pin 5 */
+		>;
+	};
+
+	pinctrl_pn7161_irq: pn7161irqgrp {
+		fsl,pins = <
+			MX93_PAD_GPIO_IO09__GPIO2_IO09			0x31e
+			MX93_PAD_GPIO_IO10__GPIO2_IO10			0x31e
+			MX93_PAD_GPIO_IO11__GPIO2_IO11			0x31e
+		>;
+	};
+
 };
 
 &epxp {
