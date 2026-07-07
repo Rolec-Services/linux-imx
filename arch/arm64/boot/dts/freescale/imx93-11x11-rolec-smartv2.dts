@@ -57,12 +57,13 @@
 		stdout-path = &lpuart1;
 		bootargs = "console=ttyLP0,115200 earlycon";
 	};
-
+/* AM It is a digital microphone
 	dmic: dmic {
 		compatible = "dmic-codec";
 		#sound-dai-cells = <0>;
 		num-channels = <4>;
 	};
+*/
 
 	reserved-memory {
 		#address-cells = <2>;
@@ -504,11 +505,12 @@
 		};
 	};
 */
-
+/* AM
 	inertial-meter@6a {
 		compatible = "st,lsm6dso";
 		reg = <0x6a>;
 	};
+*/
 };
 
 &gpio1 {
@@ -814,19 +816,18 @@
 		*/
 	};
 
-/* AM
 	max98089: audio-codec@10 {
 		compatible = "maxim,max98089";
 		reg = <0x10>;
 
+		/*
 		clocks = <&tegra_pmc TEGRA_PMC_CLK_OUT_1>;
 		clock-names = "mclk";
 
 		assigned-clocks = <&tegra_pmc TEGRA_PMC_CLK_OUT_1>;
 		assigned-clock-parents = <&tegra_car TEGRA30_CLK_EXTERN1>;
+		*/
 	};
-*/
-
 };
 
 /* Cortex A53 debug UART */
@@ -1518,6 +1519,7 @@
 	status = "okay";
 };
 
+/* AM
 &isi {
 	status = "okay";
 
@@ -1534,7 +1536,6 @@
 	ports {
 		#address-cells = <1>;
 		#size-cells = <0>;
-/* AM
 		port@0 {
 			reg = <0>;
 			mipi_csi_in: endpoint {
@@ -1543,7 +1544,6 @@
 				clock-lanes = <0>;
 			};
 		};
-*/
 
 		port@1 {
 			reg = <1>;
@@ -1554,6 +1554,7 @@
 		};
 	};
 };
+*/
 
 &dphy_rx {
 	status = "okay";
