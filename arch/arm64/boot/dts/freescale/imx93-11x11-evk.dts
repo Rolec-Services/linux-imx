@@ -743,7 +743,7 @@
 &lpspi6 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_lpspi6>;
-	cs-gpios = <&gpio2 0 GPIO_ACTIVE_LOW>; /* Controls MX93_PAD_GPIO_IO00 */
+	cs-gpios = <&gpio2 0 GPIO_ACTIVE_LOW>;  /*Controls MX93_PAD_GPIO_IO00 */
 	status = "okay";
 
 	nxpnfc@0 {
@@ -756,7 +756,7 @@
        pinctrl-names = "default";
        pinctrl-0 = <&pinctrl_pn7161_irq>;
 
-       nxp,nxpnfc-irq = <&gpio2 9 GPIO_ACTIVE_HIGH>; /* IRQ, pin 21   */
+       nxp,nxpnfc-irq = <&gpio2 9 IRQ_TYPE_EDGE_RISING>; /* IRQ, pin 21   */
        nxp,nxpnfc-ven = <&gpio2 10 GPIO_ACTIVE_HIGH>;/* VEN, pin 19   */
        nxp,nxpnfc-fw-dwnld = <&gpio2 11 GPIO_ACTIVE_HIGH>; /* FW_DWNLD, pin 23   */
        status = "okay";
@@ -1303,7 +1303,8 @@
 
 	pinctrl_lpspi6: lpspi6grp {
 		fsl,pins = <
-			MX93_PAD_GPIO_IO00__GPIO2_IO00   0x39e  /* Software CS (GPIO), pin 27 */
+			// MX93_PAD_GPIO_IO00__LPSPI6_PCS0  0x39e   /* CS0: Push-Pull Output, pin 27 */
+			MX93_PAD_GPIO_IO00__GPIO2_IO00   0x31e   /*Software CS (GPIO), pin 27 */
 			MX93_PAD_GPIO_IO01__LPSPI6_SIN   0x39e  /* MISO: Pull-up enabled, Input, pin 28 */
 			MX93_PAD_GPIO_IO02__LPSPI6_SOUT  0x39e  /* MOSI: Push-Pull Output, pin 3 */
 			MX93_PAD_GPIO_IO03__LPSPI6_SCK   0x39e  /* SCLK: SPI Clock Output, pin 5 */
@@ -1312,9 +1313,9 @@
 
 	pinctrl_pn7161_irq: pn7161irqgrp {
 		fsl,pins = <
-			MX93_PAD_GPIO_IO09__GPIO2_IO09			0x31e
-			MX93_PAD_GPIO_IO10__GPIO2_IO10			0x31e
-			MX93_PAD_GPIO_IO11__GPIO2_IO11			0x31e
+			MX93_PAD_GPIO_IO09__GPIO2_IO09	0x31e /* IRQ, pin 21 */
+			MX93_PAD_GPIO_IO10__GPIO2_IO10	0x31e /* VEN, pin 19 */
+			MX93_PAD_GPIO_IO11__GPIO2_IO11	0x31e /* FW_DWNLD, pin 23 */
 		>;
 	};
 
