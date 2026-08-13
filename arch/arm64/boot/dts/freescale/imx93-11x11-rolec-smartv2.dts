@@ -559,15 +559,29 @@
 	};
 */
 };
+/* AM this is correct for ES1 version of the smartv2,
+ but for ES2 it is GPIO3 27
+*/
+//&gpio1 {
+//    pcal6524_reset_hog {
+//        gpio-hog;
+//        gpios = <12 GPIO_ACTIVE_LOW>;
+//		output-low;    /* assert reset */
+//        line-name = "pcal6524-nreset";
+//    };
+//};
 
-&gpio1 {
+&gpio3 {
     pcal6524_reset_hog {
         gpio-hog;
-        gpios = <12 GPIO_ACTIVE_LOW>;
+        gpios = <27 GPIO_ACTIVE_HIGH>;
 		output-low;    /* assert reset */
         line-name = "pcal6524-nreset";
     };
 };
+
+
+
 
 // AM remove comments to enabl e the PWM signals on SPI6 pins for the rolec smartv2 board
 //&{/} {
@@ -631,12 +645,13 @@
 		#gpio-cells = <2>;
 		interrupt-controller;
 		#interrupt-cells = <2>;
+		
 		/*
 		interrupt-parent = <&gpio3>;
 		interrupts = <27 IRQ_TYPE_LEVEL_LOW>;
 		*/
 		interrupt-parent = <&gpio1>;
-		interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
+		interrupts = <12 IRQ_TYPE_LEVEL_LOW>;
 
 		/*
 		m2-pcm-level-shifter-hog {
@@ -1322,8 +1337,9 @@
 
 	pinctrl_pcal6524: pcal6524grp {
 		fsl,pins = <
-			/*MX93_PAD_CCM_CLKO2__GPIO3_IO27			0x31e*/
-			MX93_PAD_PDM_BIT_STREAM1__GPIO1_IO10 		0x31e
+			/* AM: this is right for SmartV2 ES1, ES2 changed to GPIO1_IO12
+			MX93_PAD_PDM_BIT_STREAM1__GPIO1_IO10 		0x31e */
+			MX93_PAD_SAI1_TXC__GPIO1_IO12			0x31e
 		>;
 	};
 
