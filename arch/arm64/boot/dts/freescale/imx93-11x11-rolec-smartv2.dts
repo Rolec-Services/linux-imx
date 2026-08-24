@@ -965,6 +965,101 @@
 	//};
 };
 
+&lpspi7 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lpspi7>;
+	cs-gpios = <&gpio2 4 GPIO_ACTIVE_LOW>; /* Controls MX93_PAD_GPIO_IO00 */
+	status = "okay";
+
+	esp32c5_hosted: wifi@0 {
+        compatible = "espressif,esp-hosted";
+        reg = <0>;
+        spi-max-frequency = <10000000>;
+        spi-cpol;
+        spi-cpha;
+        handshake-gpios = <&gpio1 10 GPIO_ACTIVE_LOW>;
+        dataready-gpios = <&gpio4 28 GPIO_ACTIVE_HIGH>;
+    };
+};
+
+&pcal6524 {
+//	esp32c5_prog_pin_hog {
+//		gpio-hog;
+//		gpios = <23 GPIO_ACTIVE_LOW>;
+//		output-high;
+//		line-name = "esp32c5_prog_pin";
+//	};
+
+//	esp32c5_rst_pin_hog {
+//		gpio-hog;
+//		gpios = <15 GPIO_ACTIVE_LOW>;
+//		output-low;
+//		line-name = "esp32c5_rst_pin";
+//	};
+
+//	esp32c5_usb_select_pin_hog {
+//		gpio-hog;
+//		gpios = <21 GPIO_ACTIVE_HIGH>;
+//		output-low;
+//		line-name = "esp32c5_usb_select_pin";
+//	};
+
+};
+
+/* Configure the associated USB PHY to be always enabled */
+&usbphynop2 {
+    status = "okay";
+};
+
+/ {
+    reg_usb1_vbus: regulator-usb1-vbus {
+        compatible = "regulator-fixed";
+        regulator-name = "usb1_vbus";
+        regulator-min-microvolt = <5000000>;
+        regulator-max-microvolt = <5000000>;
+
+        /* The STMPS2151STR requires an active-HIGH signal to turn ON */
+        gpio = <&pcal6524 4 GPIO_ACTIVE_HIGH>;
+        enable-active-high;
+
+        /* Ensures the OS can toggle power at runtime during mode changes */
+        regulator-always-on;
+    };
+};
+
+&usbphynop1 {
+    fsl,vbus-detect-ext;
+    status = "okay";
+};
+
+&usbotg1 {
+    dr_mode = "otg";
+    vbus-supply = <&reg_usb1_vbus>;
+
+    pinctrl-names = "default";
+    pinctrl-0 = <&pinctrl_usbotg1_ext>;
+
+    /* Configures the fault notification line (nFltIRQ -> GPIO2_21) */
+    interrupt-parent = <&gpio2>;
+    interrupts = <21 IRQ_TYPE_EDGE_FALLING>; /* Active Low fault line */
+
+    /* Enable internal Linux subsystem driver parsing for overcurrent flags */
+    over-current-active-low;
+
+    status = "okay";
+};
+
+&usbotg2 {
+    /* Force host mode; ignores the ID pin state */
+    dr_mode = "host";
+
+    /* Disables VBUS hardware sensing overvoltage checking */
+    disable-over-current;
+
+    /* Ensure the controller is enabled */
+    status = "okay";
+};
+
 
 /* AM
 &lpuart5 {
@@ -1312,6 +1407,17 @@
 		>;
 	};
 
+	pinctrl_lpspi7: lpspi7grp {
+		fsl,pins = <
+			MX93_PAD_GPIO_IO04__GPIO2_IO04  0x39e  /* Software Chip Select (GPIO) */
+			MX93_PAD_GPIO_IO04__GPIO2_IO04  0x39e  /* MISO: Pull-up enabled, Input */
+			MX93_PAD_GPIO_IO06__LPSPI7_SOUT  0x39e  /* MOSI: Push-Pull Output */
+			MX93_PAD_GPIO_IO07__LPSPI7_SCK   0x39e  /* SCLK: SPI Clock Output */
+			MX93_PAD_PDM_BIT_STREAM1__GPIO1_IO10   0x39e  /* ESP32 C5 Handshake pin */
+			MX93_PAD_CCM_CLKO3__GPIO4_IO28   0x39e  /* ESP32 C5 DataReady pin */
+		>;
+	};
+
 	pinctrl_pn7161_irq: pn7161irqgrp {
 		fsl,pins = <
 			MX93_PAD_GPIO_IO10__GPIO2_IO10			0x31e
@@ -1483,6 +1589,13 @@
 			MX93_PAD_SD2_CD_B__GPIO3_IO00		0x51e
 		>;
 	};
+
+	pinctrl_usbotg1_ext: usbotg1extgrp {
+        fsl,pins = <
+            /* nFltIRQ Open Drain Input Mapping (GPIO2_21) */
+			MX93_PAD_GPIO_IO21__GPIO2_IO21                0x11e
+        >;
+    };
 
 	/* need to config the SION for data and cmd pad, refer to ERR052021 */
 	pinctrl_usdhc2: usdhc2grp {
