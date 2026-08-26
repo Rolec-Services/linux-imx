@@ -772,6 +772,24 @@
 	//};
 };
 
+&lpspi7 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_lpspi7>;
+	cs-gpios = <&gpio2 4 GPIO_ACTIVE_LOW>; /* Controls MX93_PAD_GPIO_IO00 */
+	status = "okay";
+
+	esp32c5_hosted: wifi@0 {
+        compatible = "espressif,esp-hosted";
+        reg = <0>;
+        spi-max-frequency = <10000000>;
+        spi-cpol;
+        spi-cpha;
+        handshake-gpios = <&gpio2 13 GPIO_ACTIVE_LOW>;
+        dataready-gpios = <&gpio2 12 GPIO_ACTIVE_HIGH>;
+    };
+};
+
+
 
 &media_blk_ctrl {
 	status = "okay";
@@ -1064,7 +1082,7 @@
 
 	pinctrl_pdm_sleep: pdmsleepgrp {
 		fsl,pins = <
-			MX93_PAD_PDM_CLK__GPIO1_IO08			0x31e
+			MX93_PAD_PDM_CLK__GPIO1_IO08			    0x31e
 			MX93_PAD_PDM_BIT_STREAM0__GPIO1_IO09		0x31e
 			MX93_PAD_PDM_BIT_STREAM1__GPIO1_IO10		0x31e
 		>;

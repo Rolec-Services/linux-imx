@@ -1410,11 +1410,11 @@
 	pinctrl_lpspi7: lpspi7grp {
 		fsl,pins = <
 			MX93_PAD_GPIO_IO04__GPIO2_IO04  0x39e  /* Software Chip Select (GPIO) */
-			MX93_PAD_GPIO_IO04__GPIO2_IO04  0x39e  /* MISO: Pull-up enabled, Input */
-			MX93_PAD_GPIO_IO06__LPSPI7_SOUT  0x39e  /* MOSI: Push-Pull Output */
-			MX93_PAD_GPIO_IO07__LPSPI7_SCK   0x39e  /* SCLK: SPI Clock Output */
+			MX93_PAD_GPIO_IO05__LPSPI7_SIN  0x39e  /* MISO: Pull-up enabled, Input */
+			MX93_PAD_GPIO_IO06__LPSPI7_SOUT 0x39e  /* MOSI: Push-Pull Output */
+			MX93_PAD_GPIO_IO07__LPSPI7_SCK  0x39e  /* SCLK: SPI Clock Output */
 			MX93_PAD_PDM_BIT_STREAM1__GPIO1_IO10   0x39e  /* ESP32 C5 Handshake pin */
-			MX93_PAD_CCM_CLKO3__GPIO4_IO28   0x39e  /* ESP32 C5 DataReady pin */
+			MX93_PAD_CCM_CLKO3__GPIO4_IO28  0x39e  /* ESP32 C5 DataReady pin */
 		>;
 	};
 
