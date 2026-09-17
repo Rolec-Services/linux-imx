@@ -292,6 +292,7 @@
 		};
 	};
 
+/*
 	sound-wm8962 {
 		compatible = "fsl,imx-audio-wm8962";
 		model = "wm8962-audio";
@@ -307,7 +308,7 @@
 			"IN3R", "AMIC",
 			"IN1R", "AMIC";
 	};
-
+*/
 	sound-xcvr {
 		compatible = "fsl,imx-audio-card";
 		model = "imx-audio-xcvr";
@@ -740,30 +741,105 @@
 	};
 };
 
+//&lpspi6 {
+//	pinctrl-names = "default";
+//	pinctrl-0 = <&pinctrl_lpspi6>;
+//	cs-gpios = <&gpio2 0 GPIO_ACTIVE_LOW>;  /*Controls MX93_PAD_GPIO_IO00 */
+//	status = "okay";
+//
+//	nxpnfc@0 {
+//       compatible = "nxp,nxpnfc";
+//       reg = <0>; /* CS0 */
+//       //spi-max-frequency = <7000000>; /* start safe; tune as needed */
+//       spi-max-frequency = <1000000>; /* start safe; tune as needed */
+//
+//       /* muxing of IRQ pin */
+//       pinctrl-names = "default";
+//       pinctrl-0 = <&pinctrl_pn7161_irq>;
+//
+//       nxp,nxpnfc-irq = <&gpio2 9 IRQ_TYPE_EDGE_RISING>; /* IRQ, pin 21   */
+//       nxp,nxpnfc-ven = <&gpio2 10 GPIO_ACTIVE_HIGH>;/* VEN, pin 19   */
+//       nxp,nxpnfc-fw-dwnld = <&gpio2 11 GPIO_ACTIVE_HIGH>; /* FW_DWNLD, pin 23   */
+//       status = "okay";
+//   };
+//
+//    // AM: Remove comments to enable the /dev/spidev6.0
+//	//spidev0: spidev@0 {
+//	//	/* spidev.c rejects plain "spidev" in DT; use a whitelisted compatible */
+//	//	compatible = "rohm,dh2228fv";
+//	//	reg = <0>; /* CS0 */
+//	//	spi-max-frequency = <1000000>; /* start safe; tune as needed */
+//	//	status = "okay";
+//	//};
+//};
+
+&sai1 {
+	status = "disable";
+};
+
+
+//&lpspi3 {
+//	pinctrl-names = "default";
+//	pinctrl-0 = <&pinctrl_lpspi3>;
+//	cs-gpios = <&gpio2 8 GPIO_ACTIVE_LOW>; /* Controls MX93_PAD_GPIO_IO00 */
+//	status = "okay";
+//
+//	esp32c5_hosted: wifi@0 {
+//        compatible = "espressif,esp-hosted";
+//        reg = <0>;
+//        spi-max-frequency = <1000000>;
+//
+//		/* Mode 0: no spi-cpol, no spi-cpha */
+//		/* Mode 1: spi-cpha */
+//		/* Mode 2: spi-cpol */
+//		/* Mode 3: spi-cpol + spi-cpha */
+//        spi-cpol;
+//        //spi-cpha;
+//
+//		reset-gpios = <&gpio2 14 GPIO_ACTIVE_LOW>;
+//        handshake-gpios = <&gpio2 16 IRQ_TYPE_EDGE_RISING>;
+//        dataready-gpios = <&gpio2 18 IRQ_TYPE_EDGE_RISING>;
+//	};
+
+   // AM: Remove comments to enable the /dev/spidev6.0
+//	spidev_lpspi7_0: spidev@0 {
+//		/* spidev.c rejects plain "spidev" in DT; use a whitelisted compatible */
+//		compatible = "rohm,dh2228fv";
+//		reg = <0>; /* CS0 */
+//		spi-max-frequency = <1000000>; /* start safe; tune as needed */
+//		status = "okay";
+//	};
+//};
+
 &lpspi6 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_lpspi6>;
-	cs-gpios = <&gpio2 0 GPIO_ACTIVE_LOW>;  /*Controls MX93_PAD_GPIO_IO00 */
+	cs-gpios = <&gpio2 0 GPIO_ACTIVE_LOW>; /* Controls MX93_PAD_GPIO_IO00 */
 	status = "okay";
 
-	nxpnfc@0 {
-       compatible = "nxp,nxpnfc";
-       reg = <0>; /* CS0 */
-       //spi-max-frequency = <7000000>; /* start safe; tune as needed */
-       spi-max-frequency = <1000000>; /* start safe; tune as needed */
+	esp32c5_hosted: wifi@0 {
+       compatible = "espressif,esp-hosted";
+       reg = <0>;
+       spi-max-frequency = <30000000>;
 
-       /* muxing of IRQ pin */
-       pinctrl-names = "default";
-       pinctrl-0 = <&pinctrl_pn7161_irq>;
+		/* Mode 0: no spi-cpol, no spi-cpha */
+		/* Mode 1: spi-cpha */
+		/* Mode 2: spi-cpol */
+		/* Mode 3: spi-cpol + spi-cpha */
+		spi-cpol;
+		//spi-cpha;
 
-       nxp,nxpnfc-irq = <&gpio2 9 IRQ_TYPE_EDGE_RISING>; /* IRQ, pin 21   */
-       nxp,nxpnfc-ven = <&gpio2 10 GPIO_ACTIVE_HIGH>;/* VEN, pin 19   */
-       nxp,nxpnfc-fw-dwnld = <&gpio2 11 GPIO_ACTIVE_HIGH>; /* FW_DWNLD, pin 23   */
-       status = "okay";
-   };
+		/* muxing of IRQ pin */
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_esp32c5>;
 
-    // AM: Remove comments to enable the /dev/spidev6.0
-	//spidev0: spidev@0 {
+		reset-gpios = <&gpio2 14 GPIO_ACTIVE_HIGH>;
+		handshake-gpios = <&gpio2 16 IRQ_TYPE_EDGE_RISING>;
+		dataready-gpios = <&gpio2 18 IRQ_TYPE_EDGE_RISING>;
+	};
+
+	// AM: Remove comments to enable the /dev/spidev6.0
+	//spidev_lpspi6_0: spidev@0 {
 	//	/* spidev.c rejects plain "spidev" in DT; use a whitelisted compatible */
 	//	compatible = "rohm,dh2228fv";
 	//	reg = <0>; /* CS0 */
@@ -771,25 +847,6 @@
 	//	status = "okay";
 	//};
 };
-
-&lpspi7 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_lpspi7>;
-	cs-gpios = <&gpio2 4 GPIO_ACTIVE_LOW>; /* Controls MX93_PAD_GPIO_IO00 */
-	status = "okay";
-
-	esp32c5_hosted: wifi@0 {
-        compatible = "espressif,esp-hosted";
-        reg = <0>;
-        spi-max-frequency = <10000000>;
-        spi-cpol;
-        spi-cpha;
-        handshake-gpios = <&gpio2 13 GPIO_ACTIVE_LOW>;
-        dataready-gpios = <&gpio2 12 GPIO_ACTIVE_HIGH>;
-    };
-};
-
-
 
 &media_blk_ctrl {
 	status = "okay";
@@ -824,6 +881,7 @@
 	status = "okay";
 };
 
+/*
 &sai3 {
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&pinctrl_sai3>;
@@ -834,6 +892,7 @@
 	fsl,sai-mclk-direction-output;
 	status = "okay";
 };
+*/
 
 &usbotg1 {
 	dr_mode = "otg";
@@ -1163,6 +1222,7 @@
 		>;
 	};
 
+/*
 	pinctrl_sai3: sai3grp {
 		fsl,pins = <
 			MX93_PAD_GPIO_IO26__SAI3_TX_SYNC                0x31e
@@ -1182,6 +1242,7 @@
 			MX93_PAD_GPIO_IO20__GPIO2_IO20			0x51e
 		>;
 	};
+*/
 
 	pinctrl_spdif: spdifgrp {
 		fsl,pins = <
@@ -1329,13 +1390,36 @@
 		>;
 	};
 
-	pinctrl_pn7161_irq: pn7161irqgrp {
+	pinctrl_esp32c5: esp32c5grp {
 		fsl,pins = <
-			MX93_PAD_GPIO_IO09__GPIO2_IO09	0x31e /* IRQ, pin 21 */
-			MX93_PAD_GPIO_IO10__GPIO2_IO10	0x31e /* VEN, pin 19 */
-			MX93_PAD_GPIO_IO11__GPIO2_IO11	0x31e /* FW_DWNLD, pin 23 */
+			MX93_PAD_GPIO_IO18__GPIO2_IO18      0x31e   /* Pin 12 (DataReady Input) */
+            MX93_PAD_GPIO_IO16__GPIO2_IO16      0x31e   /* Pin 36 (Handshake Interrupt) */
+            MX93_PAD_GPIO_IO14__GPIO2_IO14      0x31e   /* Pin 8 (Reset Output) */
+            MX93_PAD_GPIO_IO19__GPIO2_IO19      0x31e   /* Pin 35 (Prog Boot Output) */
 		>;
 	};
+
+//	pinctrl_lpspi3: lpspi3grp {
+//        fsl,pins = <
+//            //MX93_PAD_GPIO_IO08__LPSPI3_PCS0   0x3fe   /* Pin 24 (CS) */
+//            MX93_PAD_GPIO_IO08__GPIO2_IO08     	0x3fe   /* Pin 24 (CS) */
+//            MX93_PAD_GPIO_IO09__LPSPI3_SIN      0x3fe   /* Pin 21 (MISO) */
+//            MX93_PAD_GPIO_IO10__LPSPI3_SOUT     0x3fe   /* Pin 19 (MOSI) */
+//            MX93_PAD_GPIO_IO11__LPSPI3_SCK      0x3fe   /* Pin 23 (SCLK) */
+//			MX93_PAD_GPIO_IO18__GPIO2_IO18      0x31e   /* Pin 12 (DataReady Input) */
+//            MX93_PAD_GPIO_IO16__GPIO2_IO16      0x31e   /* Pin 36 (Handshake Interrupt) */
+//            MX93_PAD_GPIO_IO14__GPIO2_IO14      0x31e   /* Pin 8 (Reset Output) */
+//            MX93_PAD_GPIO_IO19__GPIO2_IO19      0x31e   /* Pin 35 (Prog Boot Output) */
+//        >;
+//    };
+
+	//pinctrl_pn7161_irq: pn7161irqgrp {
+	//	fsl,pins = <
+	//		MX93_PAD_GPIO_IO09__GPIO2_IO09	0x31e /* IRQ, pin 21 */
+	//		MX93_PAD_GPIO_IO10__GPIO2_IO10	0x31e /* VEN, pin 19 */
+	//		MX93_PAD_GPIO_IO11__GPIO2_IO11	0x31e /* FW_DWNLD, pin 23 */
+	//	>;
+	//};
 
 };
 
