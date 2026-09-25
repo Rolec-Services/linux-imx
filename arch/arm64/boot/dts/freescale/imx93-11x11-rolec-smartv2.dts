@@ -1019,10 +1019,7 @@
 
 };
 
-/* Configure the associated USB PHY to be always enabled */
-&usbphynop2 {
-    status = "okay";
-};
+
 
 / {
     reg_usb1_vbus: regulator-usb1-vbus {
@@ -1032,21 +1029,28 @@
         regulator-max-microvolt = <5000000>;
 
         /* The STMPS2151STR requires an active-HIGH signal to turn ON */
-        gpio = <&pcal6524 4 GPIO_ACTIVE_HIGH>;
-        enable-active-high;
+        gpio = <&pcal6524 4 GPIO_ACTIVE_LOW>;
+        enable-active-low;
 
         /* Ensures the OS can toggle power at runtime during mode changes */
         regulator-always-on;
     };
 };
 
+/* Configure the associated USB PHY to be always enabled */
+&usbphynop2 {
+    status = "okay";
+};
+
 &usbphynop1 {
-    fsl,vbus-detect-ext;
+	fsl,vbus-detect-ext;
     status = "okay";
 };
 
 &usbotg1 {
-    dr_mode = "otg";
+    dr_mode = "host";
+	samsung,picophy-pre-emp-curr-control = <3>;
+	samsung,picophy-dc-vol-level-adjust = <7>;
     vbus-supply = <&reg_usb1_vbus>;
 
     pinctrl-names = "default";
@@ -1057,7 +1061,7 @@
     interrupts = <21 IRQ_TYPE_EDGE_FALLING>; /* Active Low fault line */
 
     /* Enable internal Linux subsystem driver parsing for overcurrent flags */
-    over-current-active-low;
+	over-current-active-low;
 
     status = "okay";
 };
@@ -1065,6 +1069,8 @@
 &usbotg2 {
     /* Force host mode; ignores the ID pin state */
     dr_mode = "host";
+	samsung,picophy-pre-emp-curr-control = <3>;
+	samsung,picophy-dc-vol-level-adjust = <7>;
 
     /* Disables VBUS hardware sensing overvoltage checking */
     disable-over-current;
