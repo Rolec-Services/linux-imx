@@ -55,10 +55,16 @@
 		spi8 = &lpspi8;
 	};
 
+    //memory@80000000 {
+    //    device_type = "memory";
+    //    reg = <0x0 0x80000000 0x0 0x3E000000>; /* Sets base size cleanly to 1024MB - 32MB (reserved for firmware) */
+   //};
+
 	chosen {
 		stdout-path = &lpuart1;
 		bootargs = "console=ttyLP0,115200 earlycon";
 	};
+
 /* AM It is a digital microphone
 	dmic: dmic {
 		compatible = "dmic-codec";
@@ -976,7 +982,7 @@
 	esp32c5: wifi@0 {
         compatible = "espressif,esp-hosted";
         reg = <0>;
-        spi-max-frequency = <30000000>;
+        spi-max-frequency = <12000000>; /* 12 MHz */
 		
 		/* Mode 0: no spi-cpol, no spi-cpha */
 		/* Mode 1: spi-cpha */
@@ -1069,8 +1075,8 @@
 &usbotg2 {
     /* Force host mode; ignores the ID pin state */
     dr_mode = "host";
-	samsung,picophy-pre-emp-curr-control = <3>;
-	samsung,picophy-dc-vol-level-adjust = <7>;
+	//samsung,picophy-pre-emp-curr-control = <3>;
+	//samsung,picophy-dc-vol-level-adjust = <7>;
 
     /* Disables VBUS hardware sensing overvoltage checking */
     disable-over-current;
