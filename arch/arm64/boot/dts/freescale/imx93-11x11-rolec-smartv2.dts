@@ -974,6 +974,9 @@
 &lpspi7 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_lpspi7>;
+    assigned-clocks = <&clk IMX93_CLK_LPSPI7>;
+    assigned-clock-parents = <&clk IMX93_CLK_SYS_PLL_PFD0_DIV2>;
+	assigned-clock-rates = <100000000>;
 	fsl,spi-cs-sck-delay = <1>; 
     fsl,spi-sck-cs-delay = <1>;
 	cs-gpios = <&gpio2 4 GPIO_ACTIVE_LOW>; /* Controls MX93_PAD_GPIO_IO00 */
@@ -982,7 +985,7 @@
 	esp32c5: wifi@0 {
         compatible = "espressif,esp-hosted";
         reg = <0>;
-        spi-max-frequency = <12000000>; /* 12 MHz */
+        spi-max-frequency = <25000000>; /* 25 MHz */
 		
 		/* Mode 0: no spi-cpol, no spi-cpha */
 		/* Mode 1: spi-cpha */
