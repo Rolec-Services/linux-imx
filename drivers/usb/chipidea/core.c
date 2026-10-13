@@ -611,6 +611,32 @@ static enum usb_role ci_usb_role_switch_get(struct usb_role_switch *sw)
 	return role;
 }
 
+#define CI_EXT_VBUS_SETTLE_MS	100
+#define CI_EXT_VBUS_TIMEOUT_MS	1000
+
+/*
+ * Real VBUS comparator state, to be called outside host role (our VBUS off)
+ * with the controller resumed. hw_read_otgsc() can't be used: with a role
+ * switch it reports the role instead of the pin. Gives VBUS left from a
+ * previous host role some time to discharge.
+ */
+static bool ci_ext_vbus_present(struct ci_hdrc *ci)
+{
+	unsigned long timeout;
+
+	/* The comparator is switched off while runtime suspended */
+	msleep(CI_EXT_VBUS_SETTLE_MS);
+
+	timeout = jiffies + msecs_to_jiffies(CI_EXT_VBUS_TIMEOUT_MS);
+	while (hw_read(ci, OP_OTGSC, OTGSC_BSV)) {
+		if (time_after(jiffies, timeout))
+			return true;
+		msleep(20);
+	}
+
+	return false;
+}
+
 static int ci_usb_role_switch_set(struct usb_role_switch *sw,
 				  enum usb_role role)
 {
@@ -625,6 +651,14 @@ static int ci_usb_role_switch_set(struct usb_role_switch *sw,
 		return 0;
 
 	pm_runtime_get_sync(ci->dev);
+	if (role == USB_ROLE_HOST &&
+	    (ci->platdata->flags & CI_HDRC_HOST_EXT_VBUS_GUARD) &&
+	    ci_ext_vbus_present(ci)) {
+		dev_warn(ci->dev, "external VBUS present, host role refused\n");
+		pm_runtime_put_sync(ci->dev);
+		return -EBUSY;
+	}
+
 	/* Stop current role */
 	spin_lock_irqsave(&ci->lock, flags);
 	if (current_role == USB_ROLE_DEVICE)
@@ -819,6 +853,9 @@ static int ci_get_platdata(struct device *dev,
 
 	if (device_property_read_bool(dev, "usb-role-switch"))
 		ci_role_switch.fwnode = dev->fwnode;
+
+	if (device_property_read_bool(dev, "host-ext-vbus-guard"))
+		platdata->flags |= CI_HDRC_HOST_EXT_VBUS_GUARD;
 
 	platdata->pctl = devm_pinctrl_get(dev);
 	if (!IS_ERR(platdata->pctl)) {

@@ -234,6 +234,15 @@
 		enable-active-high;
 	};
 
+	/* STMPS2151 FAULT: drops USB1 out of host role (VBUS off) */
+	usb1-vbus-fault {
+		compatible = "usb-vbus-fault-gpio";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_usb1_flt>;
+		fault-gpios = <&gpio2 21 GPIO_ACTIVE_LOW>;	/* nFLT-IRQ */
+		usb-role-switch = <&usbotg1>;
+	};
+
 /* AM
 	backlight_lvds: backlight-lvds {
 		compatible = "pwm-backlight";
@@ -1065,25 +1074,6 @@
     status = "okay";
 };
 
-&usbotg1 {
-    dr_mode = "host";
-	samsung,picophy-pre-emp-curr-control = <3>;
-	samsung,picophy-dc-vol-level-adjust = <7>;
-    vbus-supply = <&reg_usb1_vbus>;
-
-    pinctrl-names = "default";
-    pinctrl-0 = <&pinctrl_usbotg1_ext>;
-
-    /* Configures the fault notification line (nFltIRQ -> GPIO2_21) */
-    interrupt-parent = <&gpio2>;
-    interrupts = <21 IRQ_TYPE_EDGE_FALLING>; /* Active Low fault line */
-
-    /* Enable internal Linux subsystem driver parsing for overcurrent flags */
-	over-current-active-low;
-
-    status = "okay";
-};
-
 &usbotg2 {
     /* Force host mode; ignores the ID pin state */
     dr_mode = "host";
@@ -1165,13 +1155,12 @@
  * VBUS, STMPS2151 (USB-PWR-EN) supplies VBUS in host role only.
  */
 &usbotg1 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_usb1_flt>;
 	dr_mode = "otg";
 	hnp-disable;
 	srp-disable;
 	adp-disable;
 	usb-role-switch;
+	host-ext-vbus-guard;
 	vbus-supply = <&reg_usb1_vbus>;
 	disable-over-current;
 	samsung,picophy-pre-emp-curr-control = <3>;

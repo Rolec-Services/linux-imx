@@ -26,4 +26,16 @@ config USB_ROLES_INTEL_XHCI
 	  To compile the driver as a module, choose M here: the module will
 	  be called intel-xhci-usb-role-switch.
 
+config USB_ROLES_VBUS_FAULT_GPIO
+	tristate "GPIO VBUS fault monitor for USB role switches"
+	depends on GPIOLIB && OF
+	help
+	  Monitors the fault output of a VBUS power switch (over-current,
+	  thermal shutdown, reverse voltage) and moves the USB role switch
+	  out of host role, which turns VBUS off, when a fault is reported.
+	  Used on boards with a dual-role port and no Type-C controller.
+
+	  To compile the driver as a module, choose M here: the module will
+	  be called usb-vbus-fault-gpio.
+
 endif # USB_ROLE_SWITCH
