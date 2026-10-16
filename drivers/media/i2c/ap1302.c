@@ -11,6 +11,7 @@
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/firmware.h>
+#include <linux/property.h>
 #include <linux/gpio.h>
 #include <linux/i2c.h>
 #include <linux/kernel.h>
@@ -2357,29 +2358,40 @@ static int ap1302_request_firmware(struct ap1302_device *ap1302)
 	};
 
 	const struct ap1302_firmware_header *fw_hdr;
+	const char *fw_name;
 	unsigned int num_sensors;
 	unsigned int fw_size;
 	unsigned int i;
 	char name[64];
 	int ret;
 
-	for (i = 0, num_sensors = 0; i < ARRAY_SIZE(ap1302->sensors); ++i) {
-		if (ap1302->sensors[i].dev)
-			num_sensors++;
+	/*
+	 * The firmware depends on the sensor module and the board (lanes,
+	 * clock), so the device tree can name it, relative to /lib/firmware.
+	 * Without firmware-name, fall back to ap1302_<sensor>[_single|_dual]_fw.bin.
+	 */
+	if (device_property_read_string(ap1302->dev, "firmware-name",
+					&fw_name)) {
+		for (i = 0, num_sensors = 0; i < ARRAY_SIZE(ap1302->sensors); ++i) {
+			if (ap1302->sensors[i].dev)
+				num_sensors++;
+		}
+
+		ret = snprintf(name, sizeof(name), "ap1302_%s%s_fw.bin",
+			       ap1302->sensor_info->name, suffixes[num_sensors]);
+		if (ret >= sizeof(name)) {
+			dev_err(ap1302->dev, "Firmware name too long\n");
+			return -EINVAL;
+		}
+		fw_name = name;
 	}
 
-	ret = snprintf(name, sizeof(name), "ap1302_%s%s_fw.bin",
-		       ap1302->sensor_info->name, suffixes[num_sensors]);
-	if (ret >= sizeof(name)) {
-		dev_err(ap1302->dev, "Firmware name too long\n");
-		return -EINVAL;
-	}
+	dev_dbg(ap1302->dev, "Requesting firmware %s\n", fw_name);
 
-	dev_dbg(ap1302->dev, "Requesting firmware %s\n", name);
-
-	ret = request_firmware(&ap1302->fw, name, ap1302->dev);
+	ret = request_firmware(&ap1302->fw, fw_name, ap1302->dev);
 	if (ret) {
-		dev_err(ap1302->dev, "Failed to request firmware: %d\n", ret);
+		dev_err(ap1302->dev, "Failed to request firmware %s: %d\n",
+			fw_name, ret);
 		return ret;
 	}
 

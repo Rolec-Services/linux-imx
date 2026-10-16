@@ -603,6 +603,8 @@
 	ap1302: ap1302_mipi@3c {
 		compatible = "onnn,ap1302";
 		reg = <0x3c>;
+		/* /lib/firmware/..., installed by firmware-ap1302 (meta-rolec) */
+		firmware-name = "ap1302/ap1302_60fps_ar0144_27M_2Lane_awb_tuning.bin";
 		clocks = <&clk IMX93_CLK_24M>;
 		reset-gpios   = <&adp5585 0 GPIO_ACTIVE_LOW>;
 		isp_en-gpios  = <&adp5585_isp 2 GPIO_ACTIVE_HIGH>;
