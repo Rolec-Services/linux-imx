@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/media-bus-format.h>
 #include <linux/minmax.h>
+#include <linux/moduleparam.h>
 #include <linux/pm_runtime.h>
 #include <linux/string.h>
 #include <linux/types.h>
@@ -32,6 +33,19 @@
 
 #include "imx8-isi-core.h"
 #include "imx8-isi-regs.h"
+
+/*
+ * The ISI isn't cache coherent: with the default coherent allocation, MMAP
+ * capture buffers are mapped uncached in userspace and every CPU read goes
+ * to DDR (a software YUY2 -> I420 conversion of a 1280x800 frame is several
+ * times slower than from cached memory). Allocate them non-coherent instead,
+ * i.e. cached; vb2 then invalidates the CPU cache on each dequeue.
+ * Applies to the next VIDIOC_REQBUFS / VIDIOC_CREATE_BUFS.
+ */
+static bool cached_buffers = true;
+module_param(cached_buffers, bool, 0644);
+MODULE_PARM_DESC(cached_buffers,
+		 "CPU-cached (non-coherent) MMAP capture buffers (default: true)");
 
 /* Keep the first entry matching MXC_ISI_DEF_PIXEL_FORMAT */
 static const struct mxc_isi_format_info mxc_isi_formats[] = {
@@ -1329,6 +1343,28 @@ static int mxc_isi_video_enum_framesizes(struct file *file, void *priv,
 	return 0;
 }
 
+/*
+ * Applications such as GStreamer don't request V4L2_MEMORY_FLAG_NON_COHERENT,
+ * so set it here for MMAP buffers when cached_buffers is enabled.
+ */
+static int mxc_isi_video_reqbufs(struct file *file, void *priv,
+				 struct v4l2_requestbuffers *p)
+{
+	if (cached_buffers && p->memory == V4L2_MEMORY_MMAP)
+		p->flags |= V4L2_MEMORY_FLAG_NON_COHERENT;
+
+	return vb2_ioctl_reqbufs(file, priv, p);
+}
+
+static int mxc_isi_video_create_bufs(struct file *file, void *priv,
+				     struct v4l2_create_buffers *p)
+{
+	if (cached_buffers && p->memory == V4L2_MEMORY_MMAP)
+		p->flags |= V4L2_MEMORY_FLAG_NON_COHERENT;
+
+	return vb2_ioctl_create_bufs(file, priv, p);
+}
+
 static const struct v4l2_ioctl_ops mxc_isi_video_ioctl_ops = {
 	.vidioc_querycap		= mxc_isi_video_querycap,
 
@@ -1337,13 +1373,13 @@ static const struct v4l2_ioctl_ops mxc_isi_video_ioctl_ops = {
 	.vidioc_s_fmt_vid_cap_mplane	= mxc_isi_video_s_fmt,
 	.vidioc_g_fmt_vid_cap_mplane	= mxc_isi_video_g_fmt,
 
-	.vidioc_reqbufs			= vb2_ioctl_reqbufs,
+	.vidioc_reqbufs			= mxc_isi_video_reqbufs,
 	.vidioc_querybuf		= vb2_ioctl_querybuf,
 	.vidioc_qbuf			= vb2_ioctl_qbuf,
 	.vidioc_dqbuf			= vb2_ioctl_dqbuf,
 	.vidioc_expbuf			= vb2_ioctl_expbuf,
 	.vidioc_prepare_buf		= vb2_ioctl_prepare_buf,
-	.vidioc_create_bufs		= vb2_ioctl_create_bufs,
+	.vidioc_create_bufs		= mxc_isi_video_create_bufs,
 	.vidioc_streamon		= vb2_ioctl_streamon,
 	.vidioc_streamoff		= vb2_ioctl_streamoff,
 
@@ -1497,6 +1533,8 @@ int mxc_isi_video_register(struct mxc_isi_pipe *pipe,
 	memset(q, 0, sizeof(*q));
 	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	q->io_modes = VB2_MMAP | VB2_DMABUF;
+	/* Allow non-coherent (cached) MMAP buffers, see cached_buffers */
+	q->allow_cache_hints = 1;
 	q->drv_priv = video;
 	q->ops = &mxc_isi_vb2_qops;
 	q->mem_ops = &vb2_dma_contig_memops;
