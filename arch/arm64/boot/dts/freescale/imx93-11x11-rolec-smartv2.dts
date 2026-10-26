@@ -8,6 +8,7 @@
 #include <dt-bindings/usb/pd.h>
 #include <dt-bindings/leds/common.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
 #include "imx93.dtsi"
 
 &ele_fw2 {
@@ -85,14 +86,20 @@
 			size = <0 0x10000000>;
 			linux,cma-default;
 		};
-/* AM , ETHOSU is not present in MIMX9332CVVXMAB, so comment out the Ethos-U reserved memory region
-		ethosu_mem: ethosu_region@C0000000 {
-			compatible = "shared-dma-pool";
-			reusable;
-			reg = <0x0 0xC0000000 0x0 0x10000000>;
-		};
-*/
-		vdev0vring0: vdev0vring0@a4000000 {
+
+		/*
+		 * Ethos-U65 buffers (BOM part MIMX9352CVVXMAC has the NPU; the
+		 * schematic's MIMX9332 does not). Only 1 GB of DRAM is usable
+		 * (0x80000000-0xbfffffff), so use its top 256 MB instead of the
+		 * EVK's 0xc0000000, clear of the M33/ELE buffers at 0xa4000000.
+		 */
+		//ethosu_mem: ethosu_region@b0000000 {
+		//	compatible = "shared-dma-pool";
+		//	reusable;
+		//	reg = <0x0 0xb0000000 0x0 0x10000000>;
+		//};
+		
+        vdev0vring0: vdev0vring0@a4000000 {
 			reg = <0 0xa4000000 0 0x8000>;
 			no-map;
 		};
@@ -175,14 +182,13 @@
 */
 
 
-/* AM , ETHOSU is not present in MIMX9332CVVXMAB, so comment out the Ethos-U node
-	ethosu {
-		compatible = "arm,ethosu";
-		fsl,cm33-proc = <&cm33>;
-		memory-region = <&ethosu_mem>;
-		power-domains = <&mlmix>;
-	};
-*/
+	/* Ethos-U65 NPU (MIMX9352), driven through firmware on the Cortex-M33 */
+	//ethosu {
+	//	compatible = "arm,ethosu";
+	//	fsl,cm33-proc = <&cm33>;
+	//	memory-region = <&ethosu_mem>;
+	//	power-domains = <&mlmix>;
+	//};
 
 /* AM
 	reg_can2_stby: regulator-can2-stby {
@@ -241,6 +247,153 @@
 		pinctrl-0 = <&pinctrl_usb1_flt>;
 		fault-gpios = <&gpio2 21 GPIO_ACTIVE_LOW>;	/* nFLT-IRQ */
 		usb-role-switch = <&usbotg1>;
+	};
+
+	/*
+	 * HMI board (PCBA0029) on CN11 (display) and CN12 (camera).
+	 * All HMI control lines come from the PCAL6524 and are pulled low on
+	 * the SmartV2, so the HMI stays unpowered / in reset until Linux
+	 * drives them.
+	 */
+
+	/* DISPLAY_GPIO3 -> HMI DispPWR: AVDD/VGH/VGL/VCOM boost + panel VDD switch */
+	reg_hmi_disp: regulator-hmi-disp {
+		compatible = "regulator-fixed";
+		regulator-name = "HMI_DISP_PWR";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&pcal6524 2 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <20000>;
+	};
+
+	/* CAMERA_GPIO1 -> HMI CAM_POWER: OV5640 LDOs, 24 MHz XCLK, I2C level shifter */
+	reg_hmi_cam: regulator-hmi-cam {
+		compatible = "regulator-fixed";
+		regulator-name = "HMI_CAM_PWR";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&pcal6524 16 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <20000>;
+        regulator-always-on;
+	};
+
+	/* On-board 24 MHz oscillator on the HMI, powered by CAM_POWER */
+	clk_hmi_cam: clock-hmi-cam {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+		clock-output-names = "hmi_cam_xclk";
+	};
+
+	/* SX1508 I/O3 -> AL8860 CTRL (high = on, PWM dimming not supported by sx150x) */
+	backlight_lvds: backlight-lvds {
+		compatible = "gpio-backlight";
+		gpios = <&sx1508 2 GPIO_ACTIVE_HIGH>;
+		default-on;
+	};
+
+	/*
+	 * 7" 1024x600 LVDS panel. The HMI schematic labels SELB-high as 6-bit,
+	 * but on the board the panel takes 8-bit JEIDA on all 4 lanes:
+	 * jeida-18 and vesa-24 give wrong colours, jeida-24 is correct.
+	 * Generic timings: replace with the panel datasheet values once the part
+	 * number is known. The pixel clock is VIDEO_PLL (400 MHz) / 7, so the
+	 * vertical blanking is stretched to keep ~60 Hz.
+	 */
+	panel_lvds: panel-lvds {
+		compatible = "rolec,smartv2-hmi-panel", "panel-lvds";
+		width-mm = <154>;
+		height-mm = <86>;
+		data-mapping = "jeida-24";
+		power-supply = <&reg_hmi_disp>;
+		/*
+		 * DISPLAY_GPIO1 -> panel nRESET. panel-lvds never releases
+		 * reset-gpios, but drives enable-gpios high after the supply
+		 * is up, which is the sequence this pin needs.
+		 */
+		enable-gpios = <&pcal6524 0 GPIO_ACTIVE_HIGH>;
+		backlight = <&backlight_lvds>;
+
+		panel-timing {
+			clock-frequency = <57143000>;
+			hactive = <1024>;
+			vactive = <600>;
+			hfront-porch = <160>;
+			hback-porch = <140>;
+			hsync-len = <20>;
+			vfront-porch = <83>;
+			vback-porch = <23>;
+			vsync-len = <3>;
+			de-active = <1>;
+		};
+
+		port {
+			panel_lvds_in: endpoint {
+				remote-endpoint = <&lvds_out>;
+			};
+		};
+	};
+
+	/* HMI LEDs driven by the SX1508 (all active high through NPN drivers) */
+	hmi-leds {
+		compatible = "gpio-leds";
+
+		led-button1 {
+			label = "hmi-button1";
+			gpios = <&sx1508 0 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led-button2 {
+			label = "hmi-button2";
+			gpios = <&sx1508 1 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led-button3 {
+			label = "hmi-button3";
+			gpios = <&sx1508 5 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led-button4 {
+			label = "hmi-button4";
+			gpios = <&sx1508 4 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led-camera {
+			label = "hmi-camera-active";
+			gpios = <&sx1508 6 GPIO_ACTIVE_HIGH>;
+			color = <LED_COLOR_ID_RED>;
+			default-state = "off";
+		};
+	};
+
+	/* MAX98089 on SAI3; speaker (SPKL) and microphone (MIC2) are on the HMI */
+	sound-max98089 {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "max98089-audio";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,bitclock-master = <&sndcpu>;
+		simple-audio-card,frame-master = <&sndcpu>;
+		simple-audio-card,widgets =
+			"Speaker", "HMI Speaker",
+			"Microphone", "HMI Mic";
+		simple-audio-card,routing =
+			"HMI Speaker", "SPKL",
+			"HMI Mic", "MICBIAS",
+			"MIC2", "HMI Mic";
+
+		sndcpu: simple-audio-card,cpu {
+			sound-dai = <&sai3>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&max98089>;
+		};
 	};
 
 /* AM
@@ -518,9 +671,31 @@
 	status = "okay";
 };
 
+/* VIDEO_PLL 400 MHz: LDB serial clock = PLL / 1, pixel clock = PLL / 7 */
 &lcdif {
 	status = "okay";
-	assigned-clock-rates = <445333333>, <148444444>, <400000000>, <133333333>;
+	assigned-clock-rates = <400000000>, <57142857>, <400000000>, <133333333>;
+};
+
+&ldb {
+	assigned-clock-rates = <400000000>;
+	status = "okay";
+
+	lvds-channel@0 {
+		status = "okay";
+
+		port@1 {
+			reg = <1>;
+
+			lvds_out: endpoint {
+				remote-endpoint = <&panel_lvds_in>;
+			};
+		};
+	};
+};
+
+&ldb_phy {
+	status = "okay";
 };
 
 &lpm {
@@ -532,11 +707,67 @@
  * When add, delete or change any target device setting in &lpi2c1,
  * please synchronize the changes to the &i3c1 bus in imx93-11x11-evk-i3c.dts.
  */
+/*
+ * I2C1 (1.8 V) is level-shifted to 3.3 V by the PCA9451A (SCLL/SDAL ->
+ * SCLH/SDAH) and goes to the HMI through both the display cable (TP_SCL/
+ * TP_SDA) and the camera cable, hence 100 kHz.
+ */
 &lpi2c1 {
-	clock-frequency = <400000>;
+	clock-frequency = <100000>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_lpi2c1>;
 	status = "okay";
+
+	/*
+	 * HMI OV5640 module (KLT-M7MA-OV5640) on CN12. PWDN is not connected
+	 * and nRESET is handled on the HMI, so power is the only control.
+	 */
+	ov5640: camera@3c {
+		compatible = "ovti,ov5640";
+		reg = <0x3c>;
+		clocks = <&clk_hmi_cam>;
+		clock-names = "xclk";
+		DOVDD-supply = <&reg_hmi_cam>;
+		AVDD-supply = <&reg_hmi_cam>;
+		DVDD-supply = <&reg_hmi_cam>;
+
+		port {
+			ov5640_out: endpoint {
+				remote-endpoint = <&mipi_csi_in>;
+				data-lanes = <1 2>;
+				clock-lanes = <0>;
+			};
+		};
+	};
+
+	/* HMI AT42QT2120 touch buttons; CHANGE shared with SX1508 nINT on TP_nIRQ */
+	touch-keys@1c {
+		compatible = "microchip,at42qt2120";
+		reg = <0x1c>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_hmi_tp_irq>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <13 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&pcal6524 9 GPIO_ACTIVE_LOW>;	/* DISP_I2C_nRST */
+		/* KEY0 proximity, KEY1 guard, KEY2..5 = Button3, Button4, Button1, Button2 */
+		linux,keycodes = <KEY_RESERVED KEY_RESERVED KEY_F3 KEY_F4 KEY_F1 KEY_F2>;
+	};
+
+	/*
+	 * HMI SX1508 I/O expander (LEDs and backlight only). Its nINT shares
+	 * TP_nIRQ with the QT2120, and the sx150x driver forces a falling-edge
+	 * shared IRQ, so no interrupt is wired here.
+	 */
+	sx1508: gpio@20 {
+		compatible = "semtech,sx1508q";
+		reg = <0x20>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		reset-gpios = <&pcal6524 1 GPIO_ACTIVE_LOW>;	/* DISPLAY_GPIO2 */
+		gpio-line-names = "HMI_LED_B1", "HMI_LED_B2", "HMI_BL_CTRL", "",
+				  "HMI_LED_B4", "HMI_LED_B3", "HMI_CAM_LED", "",
+				  "";
+	};
 
 // AM
 //	codec: wm8962@1a {
@@ -676,6 +907,13 @@
 		*/
 		interrupt-parent = <&gpio1>;
 		interrupts = <12 IRQ_TYPE_LEVEL_LOW>;
+		gpio-line-names =
+			"DISPLAY_GPIO1", "DISPLAY_GPIO2", "DISPLAY_GPIO3", "MODEM_PWR",
+			"USB1_PWR", "USB2_PWR", "RFID_PWR", "MODEM_BOOT",
+			"CAMERA_nRST", "DISP_I2C_nRST", "", "MODEM_RST",
+			"ENET1_nRST", "ENET2_nRST", "", "BLE_ENABLE",
+			"CAMERA_GPIO1", "CAMERA_GPIO2", "STATUS_R", "STATUS_G",
+			"STATUS_B", "USB2_SEL", "RFID_PROG", "BLE_nPROG";
 
 		/*
 		m2-pcm-level-shifter-hog {
@@ -691,6 +929,8 @@
 		reg = <0x25>;
 		interrupt-parent = <&gpio1>;
 		interrupts = <14 IRQ_TYPE_EDGE_FALLING>;
+		/* SCLL/SDAL (lpi2c1, 1.8 V) <-> SCLH/SDAH (3.3 V codec + HMI touch bus) */
+		nxp,i2c-lt-enable;
 
 		regulators {
 			buck1: BUCK1 {
@@ -921,17 +1161,13 @@
 		*/
 	};
 
+	/* Verified on the board: the codec answers here, not on lpi2c1 */
 	max98089: audio-codec@10 {
 		compatible = "maxim,max98089";
 		reg = <0x10>;
-
-		/*
-		clocks = <&tegra_pmc TEGRA_PMC_CLK_OUT_1>;
+		#sound-dai-cells = <0>;
+		clocks = <&clk IMX93_CLK_SAI3_GATE>;	/* SAI3_MCLK pin */
 		clock-names = "mclk";
-
-		assigned-clocks = <&tegra_pmc TEGRA_PMC_CLK_OUT_1>;
-		assigned-clock-parents = <&tegra_car TEGRA30_CLK_EXTERN1>;
-		*/
 	};
 };
 
@@ -1513,6 +1749,13 @@
 		>;
 	};
 
+	/* TP_nIRQ: HMI QT2120 CHANGE / SX1508 nINT via U16 (BOOT3 after reset) */
+	pinctrl_hmi_tp_irq: hmitpirqgrp {
+		fsl,pins = <
+			MX93_PAD_SAI1_TXD0__GPIO1_IO13			0x31e
+		>;
+	};
+
 	pinctrl_usb1_flt: usb1fltgrp {
 		fsl,pins = <
 			MX93_PAD_GPIO_IO21__GPIO2_IO21			0x31e	/* nFLT-IRQ, ext. 100K pull-up */
@@ -1815,7 +2058,6 @@
 	status = "okay";
 };
 
-/* AM
 &isi {
 	status = "okay";
 
@@ -1832,10 +2074,12 @@
 	ports {
 		#address-cells = <1>;
 		#size-cells = <0>;
+
 		port@0 {
 			reg = <0>;
+
 			mipi_csi_in: endpoint {
-				remote-endpoint = <&isp_out>;
+				remote-endpoint = <&ov5640_out>;
 				data-lanes = <1 2>;
 				clock-lanes = <0>;
 			};
@@ -1850,7 +2094,6 @@
 		};
 	};
 };
-*/
 
 &dphy_rx {
 	status = "okay";

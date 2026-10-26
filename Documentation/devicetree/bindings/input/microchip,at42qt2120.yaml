@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/input/microchip,at42qt2120.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Microchip AT42QT2120 12-key QTouch sensor
+
+maintainers:
+  - Andrei Mironenko <andrei.mironenko@gmail.com>
+
+allOf:
+  - $ref: input.yaml#
+
+properties:
+  compatible:
+    const: microchip,at42qt2120
+
+  reg:
+    const: 0x1c
+
+  interrupts:
+    maxItems: 1
+    description: Open-drain, active-low CHANGE output.
+
+  reset-gpios:
+    maxItems: 1
+    description: GPIO connected to the active-low RESET pin.
+
+  linux,keycodes:
+    minItems: 1
+    maxItems: 12
+    description:
+      Keycode for each key channel, starting at KEY0. Channels used as
+      guard or proximity electrodes should be set to KEY_RESERVED.
+
+  microchip,detect-threshold:
+    $ref: /schemas/types.yaml#/definitions/uint8-array
+    minItems: 12
+    maxItems: 12
+    description: Values written to the key detect threshold registers 16-27.
+
+  microchip,key-control:
+    $ref: /schemas/types.yaml#/definitions/uint8-array
+    minItems: 12
+    maxItems: 12
+    description: Values written to the key control registers 28-39.
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - linux,keycodes
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    #include <dt-bindings/input/input.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        touch-keys@1c {
+            compatible = "microchip,at42qt2120";
+            reg = <0x1c>;
+            interrupt-parent = <&gpio1>;
+            interrupts = <13 IRQ_TYPE_LEVEL_LOW>;
+            reset-gpios = <&gpio2 9 GPIO_ACTIVE_LOW>;
+            linux,keycodes = <KEY_RESERVED KEY_RESERVED KEY_F3 KEY_F4
+                              KEY_F1 KEY_F2>;
+        };
+    };

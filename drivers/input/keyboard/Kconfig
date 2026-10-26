@@ -188,6 +188,16 @@ config KEYBOARD_QT2160
 	  This driver can also be built as a module. If so, the module
 	  will be called qt2160.
 
+config KEYBOARD_QT2120
+	tristate "Microchip AT42QT2120 Touch Sensor Chip"
+	depends on I2C
+	help
+	  If you say yes here you get support for the Microchip (Atmel)
+	  AT42QT2120 12-key capacitive touch sensor as a keyboard input.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called qt2120.
+
 config KEYBOARD_CLPS711X
 	tristate "CLPS711X Keypad support"
 	depends on ARCH_CLPS711X || COMPILE_TEST

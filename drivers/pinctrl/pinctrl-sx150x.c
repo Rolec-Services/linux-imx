@@ -19,6 +19,8 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/of.h>
+#include <linux/delay.h>
+#include <linux/gpio/consumer.h>
 #include <linux/gpio/driver.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinctrl.h>
@@ -1122,10 +1124,21 @@ static int sx150x_probe(struct i2c_client *client)
 				     I2C_FUNC_SMBUS_WRITE_WORD_DATA;
 	struct device *dev = &client->dev;
 	struct sx150x_pinctrl *pctl;
+	struct gpio_desc *reset;
 	int ret;
 
 	if (!i2c_check_functionality(client->adapter, i2c_funcs))
 		return -ENOSYS;
+
+	/* Optional hardware reset line: pulse it, then wait for the chip */
+	reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(reset))
+		return dev_err_probe(dev, PTR_ERR(reset), "failed to get reset gpio\n");
+	if (reset) {
+		usleep_range(10, 20);
+		gpiod_set_value_cansleep(reset, 0);
+		usleep_range(5000, 6000);
+	}
 
 	pctl = devm_kzalloc(dev, sizeof(*pctl), GFP_KERNEL);
 	if (!pctl)

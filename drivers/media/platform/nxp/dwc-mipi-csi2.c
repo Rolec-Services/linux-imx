@@ -1216,6 +1216,9 @@ static int dwc_csi_subdev_log_status(struct v4l2_subdev *sd)
 	struct dwc_csi_device *csidev = sd_to_dwc_csi_device(sd);
 
 	dwc_csi_log_counters(csidev);
+	/* Live D-PHY/IPI state while streaming (dev_dbg, enable via dyndbg) */
+	if (csidev->enabled_streams)
+		dwc_csi_dump_regs(csidev);
 	return 0;
 }
 

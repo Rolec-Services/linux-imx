@@ -41,6 +41,10 @@ properties:
   '#gpio-cells':
     const: 2
 
+  reset-gpios:
+    maxItems: 1
+    description: GPIO connected to the active-low NRESET pin
+
   gpio-controller: true
 
   semtech,probe-reset:
