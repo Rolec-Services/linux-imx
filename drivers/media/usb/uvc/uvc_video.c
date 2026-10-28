@@ -257,8 +257,14 @@ static void uvc_fixup_video_ctrl(struct uvc_streaming *stream,
 		 * different camera models, the value is high enough to get most
 		 * resolutions working while not preventing two simultaneous
 		 * VGA streams at 15 fps.
+		 *
+		 * Full-speed isochronous packets are at most 1023 bytes, so the
+		 * floor would always select the largest alternate setting, which
+		 * may not fit in the EHCI transaction translator budget. Keep the
+		 * estimate for full-speed devices.
 		 */
-		bandwidth = max_t(u32, bandwidth, 1024);
+		if (stream->dev->udev->speed >= USB_SPEED_HIGH)
+			bandwidth = max_t(u32, bandwidth, 1024);
 
 		ctrl->dwMaxPayloadTransferSize = bandwidth;
 	}
