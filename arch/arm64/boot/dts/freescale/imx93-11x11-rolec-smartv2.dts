@@ -93,11 +93,11 @@
 		 * (0x80000000-0xbfffffff), so use its top 256 MB instead of the
 		 * EVK's 0xc0000000, clear of the M33/ELE buffers at 0xa4000000.
 		 */
-		//ethosu_mem: ethosu_region@b0000000 {
-		//	compatible = "shared-dma-pool";
-		//	reusable;
-		//	reg = <0x0 0xb0000000 0x0 0x10000000>;
-		//};
+		ethosu_mem: ethosu_region@b0000000 {
+			compatible = "shared-dma-pool";
+			reusable;
+			reg = <0x0 0xb0000000 0x0 0x10000000>;
+		};
 		
         vdev0vring0: vdev0vring0@a4000000 {
 			reg = <0 0xa4000000 0 0x8000>;
@@ -181,14 +181,13 @@
     };
 */
 
-
 	/* Ethos-U65 NPU (MIMX9352), driven through firmware on the Cortex-M33 */
-	//ethosu {
-	//	compatible = "arm,ethosu";
-	//	fsl,cm33-proc = <&cm33>;
-	//	memory-region = <&ethosu_mem>;
-	//	power-domains = <&mlmix>;
-	//};
+	ethosu {
+		compatible = "arm,ethosu";
+		fsl,cm33-proc = <&cm33>;
+		memory-region = <&ethosu_mem>;
+		power-domains = <&mlmix>;
+	};
 
 /* AM
 	reg_can2_stby: regulator-can2-stby {
