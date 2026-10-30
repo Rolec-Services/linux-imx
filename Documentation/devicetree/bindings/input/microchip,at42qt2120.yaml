@@ -46,6 +46,15 @@ properties:
     maxItems: 12
     description: Values written to the key control registers 28-39.
 
+  microchip,pulse-scale:
+    $ref: /schemas/types.yaml#/definitions/uint8-array
+    minItems: 12
+    maxItems: 12
+    description:
+      Values written to the pulse/scale registers 40-51. The high nibble
+      (PULSE) sets 2^PULSE accumulated samples and the low nibble (SCALE)
+      divides the sum by 2^SCALE, so the signal gain is 2^(PULSE - SCALE).
+
 required:
   - compatible
   - reg

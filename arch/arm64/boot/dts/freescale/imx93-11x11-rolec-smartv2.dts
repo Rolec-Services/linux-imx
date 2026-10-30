@@ -751,6 +751,12 @@
 		reset-gpios = <&pcal6524 9 GPIO_ACTIVE_LOW>;	/* DISP_I2C_nRST */
 		/* KEY0 proximity, KEY1 guard, KEY2..5 = Button3, Button4, Button1, Button2 */
 		linux,keycodes = <KEY_RESERVED KEY_RESERVED KEY_F3 KEY_F4 KEY_F1 KEY_F2>;
+		/* KEY1 guard disabled (cannot be an output), unused KEY6..11 driven low */
+		microchip,key-control = /bits/ 8 <0x00 0x01 0x00 0x00 0x00 0x00
+						  0x01 0x01 0x01 0x01 0x01 0x01>;
+		/* Buttons: 32 samples / 4 = 8x gain for hover detection through the glass */
+		microchip,pulse-scale = /bits/ 8 <0x00 0x00 0x52 0x52 0x52 0x52
+						  0x00 0x00 0x00 0x00 0x00 0x00>;
 	};
 
 	/*

@@ -26,6 +26,9 @@
 #define QT2120_REG_RESET		0x07
 #define QT2120_REG_DTHR(n)		(0x10 + (n))
 #define QT2120_REG_KEY_CTRL(n)		(0x1c + (n))
+#define QT2120_REG_PULSE_SCALE(n)	(0x28 + (n))
+#define QT2120_REG_KEY_SIGNAL		0x34	/* 12 x 16-bit, MSB first */
+#define QT2120_REG_REFERENCE		0x4c	/* 12 x 16-bit, MSB first */
 
 #define QT2120_DET_CALIBRATE		BIT(7)
 
@@ -121,6 +124,11 @@ static unsigned int qt2120_key_ctrl_reg(unsigned int n)
 	return QT2120_REG_KEY_CTRL(n);
 }
 
+static unsigned int qt2120_pulse_scale_reg(unsigned int n)
+{
+	return QT2120_REG_PULSE_SCALE(n);
+}
+
 static int qt2120_calibrate(struct qt2120 *qt)
 {
 	unsigned long timeout;
@@ -145,6 +153,50 @@ static int qt2120_calibrate(struct qt2120 *qt)
 	return -ETIMEDOUT;
 }
 
+static int qt2120_read_words(struct qt2120 *qt, u8 reg, u16 *vals)
+{
+	u8 buf[QT2120_NUM_KEYS * 2];
+	int ret, i;
+
+	ret = i2c_smbus_read_i2c_block_data(qt->client, reg, sizeof(buf), buf);
+	if (ret < 0)
+		return ret;
+	if (ret != sizeof(buf))
+		return -EIO;
+
+	for (i = 0; i < QT2120_NUM_KEYS; i++)
+		vals[i] = (buf[2 * i] << 8) | buf[2 * i + 1];
+	return 0;
+}
+
+/* Raw acquisition data for tuning thresholds and oversampling */
+static ssize_t key_data_show(struct device *dev, struct device_attribute *attr,
+			     char *buf)
+{
+	struct qt2120 *qt = dev_get_drvdata(dev);
+	u16 sig[QT2120_NUM_KEYS], ref[QT2120_NUM_KEYS];
+	int len = 0, ret, i;
+
+	ret = qt2120_read_words(qt, QT2120_REG_KEY_SIGNAL, sig);
+	if (ret)
+		return ret;
+	ret = qt2120_read_words(qt, QT2120_REG_REFERENCE, ref);
+	if (ret)
+		return ret;
+
+	for (i = 0; i < QT2120_NUM_KEYS; i++)
+		len += sysfs_emit_at(buf, len, "KEY%-2d signal %5u reference %5u delta %6d\n",
+				     i, sig[i], ref[i], (int)sig[i] - (int)ref[i]);
+	return len;
+}
+static DEVICE_ATTR_RO(key_data);
+
+static struct attribute *qt2120_attrs[] = {
+	&dev_attr_key_data.attr,
+	NULL
+};
+ATTRIBUTE_GROUPS(qt2120);
+
 static int qt2120_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
@@ -162,6 +214,7 @@ static int qt2120_probe(struct i2c_client *client)
 	if (!qt)
 		return -ENOMEM;
 	qt->client = client;
+	i2c_set_clientdata(client, qt);
 
 	/* nRESET is held low by a board pull-down until we release it */
 	reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
@@ -196,6 +249,9 @@ static int qt2120_probe(struct i2c_client *client)
 	if (ret)
 		return ret;
 	ret = qt2120_write_regs(qt, "microchip,key-control", qt2120_key_ctrl_reg);
+	if (ret)
+		return ret;
+	ret = qt2120_write_regs(qt, "microchip,pulse-scale", qt2120_pulse_scale_reg);
 	if (ret)
 		return ret;
 
@@ -234,7 +290,6 @@ static int qt2120_probe(struct i2c_client *client)
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to request irq\n");
 
-	i2c_set_clientdata(client, qt);
 	return 0;
 }
 
@@ -272,6 +327,7 @@ static struct i2c_driver qt2120_driver = {
 	.driver = {
 		.name = "qt2120",
 		.of_match_table = qt2120_of_match,
+		.dev_groups = qt2120_groups,
 		.pm = pm_sleep_ptr(&qt2120_pm_ops),
 	},
 	.probe = qt2120_probe,
