@@ -15,7 +15,9 @@
 #include <linux/input.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/property.h>
+#include <linux/slab.h>
 
 #define QT2120_REG_CHIP_ID		0x00
 #define QT2120_CHIP_ID			0x3e
@@ -42,6 +44,7 @@ struct qt2120 {
 	struct input_dev *input;
 	unsigned short keycodes[QT2120_NUM_KEYS];
 	u16 last_keys;
+	struct mutex lock;	/* serialises sysfs reconfiguration */
 };
 
 /* Reading the status block from DET_STATUS onwards releases CHANGE */
@@ -62,9 +65,8 @@ static int qt2120_read_status(struct qt2120 *qt, u8 *det, u16 *keys)
 	return 0;
 }
 
-static irqreturn_t qt2120_irq(int irq, void *dev_id)
+static void qt2120_process(struct qt2120 *qt)
 {
-	struct qt2120 *qt = dev_id;
 	unsigned long changed;
 	u16 keys;
 	u8 det;
@@ -72,12 +74,12 @@ static irqreturn_t qt2120_irq(int irq, void *dev_id)
 
 	if (qt2120_read_status(qt, &det, &keys)) {
 		dev_err_ratelimited(&qt->client->dev, "failed to read status\n");
-		return IRQ_HANDLED;
+		return;
 	}
 
 	changed = keys ^ qt->last_keys;
 	if (!changed)
-		return IRQ_HANDLED;
+		return;
 
 	for_each_set_bit(i, &changed, QT2120_NUM_KEYS) {
 		if (qt->keycodes[i] == KEY_RESERVED)
@@ -86,16 +88,33 @@ static irqreturn_t qt2120_irq(int irq, void *dev_id)
 	}
 	input_sync(qt->input);
 	qt->last_keys = keys;
+}
 
+static irqreturn_t qt2120_irq(int irq, void *dev_id)
+{
+	qt2120_process(dev_id);
 	return IRQ_HANDLED;
 }
 
-static int qt2120_write_regs(struct qt2120 *qt, const char *prop,
-			     unsigned int (*reg)(unsigned int))
+/* Write one byte per key to the per-key register block starting at @reg */
+static int qt2120_write_keys(struct qt2120 *qt, u8 reg, const u8 *vals)
+{
+	int i, ret;
+
+	for (i = 0; i < QT2120_NUM_KEYS; i++) {
+		ret = i2c_smbus_write_byte_data(qt->client, reg + i, vals[i]);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int qt2120_write_prop(struct qt2120 *qt, const char *prop, u8 reg)
 {
 	struct device *dev = &qt->client->dev;
 	u8 vals[QT2120_NUM_KEYS];
-	int i, ret;
+	int ret;
 
 	if (!device_property_present(dev, prop))
 		return 0;
@@ -105,28 +124,7 @@ static int qt2120_write_regs(struct qt2120 *qt, const char *prop,
 		return dev_err_probe(dev, ret, "%s needs %d entries\n",
 				     prop, QT2120_NUM_KEYS);
 
-	for (i = 0; i < QT2120_NUM_KEYS; i++) {
-		ret = i2c_smbus_write_byte_data(qt->client, reg(i), vals[i]);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
-
-static unsigned int qt2120_dthr_reg(unsigned int n)
-{
-	return QT2120_REG_DTHR(n);
-}
-
-static unsigned int qt2120_key_ctrl_reg(unsigned int n)
-{
-	return QT2120_REG_KEY_CTRL(n);
-}
-
-static unsigned int qt2120_pulse_scale_reg(unsigned int n)
-{
-	return QT2120_REG_PULSE_SCALE(n);
+	return qt2120_write_keys(qt, reg, vals);
 }
 
 static int qt2120_calibrate(struct qt2120 *qt)
@@ -191,8 +189,118 @@ static ssize_t key_data_show(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_RO(key_data);
 
+/*
+ * Apply new settings at runtime: CHANGE is masked while the registers are
+ * written and the chip recalibrates, then key state is resynchronised.
+ */
+static int qt2120_reconfigure(struct qt2120 *qt, u8 reg, const u8 *vals)
+{
+	int ret = 0;
+
+	mutex_lock(&qt->lock);
+	disable_irq(qt->client->irq);
+
+	if (vals)
+		ret = qt2120_write_keys(qt, reg, vals);
+	if (!ret)
+		ret = qt2120_calibrate(qt);
+	qt2120_process(qt);
+
+	enable_irq(qt->client->irq);
+	mutex_unlock(&qt->lock);
+
+	return ret;
+}
+
+/* Tuning registers: one value per key, KEY0 first */
+struct qt2120_reg_attr {
+	struct device_attribute attr;
+	u8 reg;
+};
+
+static ssize_t qt2120_regs_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct qt2120 *qt = dev_get_drvdata(dev);
+	u8 reg = container_of(attr, struct qt2120_reg_attr, attr)->reg;
+	u8 vals[QT2120_NUM_KEYS];
+	int len = 0, ret, i;
+
+	ret = i2c_smbus_read_i2c_block_data(qt->client, reg, sizeof(vals), vals);
+	if (ret < 0)
+		return ret;
+	if (ret != sizeof(vals))
+		return -EIO;
+
+	for (i = 0; i < QT2120_NUM_KEYS; i++)
+		len += sysfs_emit_at(buf, len, "0x%02x%c", vals[i],
+				     i == QT2120_NUM_KEYS - 1 ? '\n' : ' ');
+	return len;
+}
+
+static ssize_t qt2120_regs_store(struct device *dev,
+				 struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	struct qt2120 *qt = dev_get_drvdata(dev);
+	u8 reg = container_of(attr, struct qt2120_reg_attr, attr)->reg;
+	u8 vals[QT2120_NUM_KEYS];
+	char *str, *p, *tok;
+	int n = 0, ret = 0;
+
+	str = kstrndup(buf, count, GFP_KERNEL);
+	if (!str)
+		return -ENOMEM;
+
+	p = str;
+	while ((tok = strsep(&p, " \t\n"))) {
+		if (!*tok)
+			continue;
+		if (n == QT2120_NUM_KEYS) {
+			ret = -EINVAL;
+			break;
+		}
+		ret = kstrtou8(tok, 0, &vals[n++]);
+		if (ret)
+			break;
+	}
+	kfree(str);
+
+	if (!ret && n != QT2120_NUM_KEYS)
+		ret = -EINVAL;
+	if (!ret)
+		ret = qt2120_reconfigure(qt, reg, vals);
+
+	return ret ?: count;
+}
+
+#define QT2120_REG_ATTR(_name, _reg)					\
+	static struct qt2120_reg_attr dev_attr_##_name = {		\
+		.attr = __ATTR(_name, 0644, qt2120_regs_show,		\
+			       qt2120_regs_store),			\
+		.reg = _reg,						\
+	}
+
+QT2120_REG_ATTR(detect_threshold, QT2120_REG_DTHR(0));
+QT2120_REG_ATTR(key_control, QT2120_REG_KEY_CTRL(0));
+QT2120_REG_ATTR(pulse_scale, QT2120_REG_PULSE_SCALE(0));
+
+static ssize_t calibrate_store(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	int ret = qt2120_reconfigure(dev_get_drvdata(dev), 0, NULL);
+
+	return ret ?: count;
+}
+static DEVICE_ATTR_WO(calibrate);
+
 static struct attribute *qt2120_attrs[] = {
 	&dev_attr_key_data.attr,
+	&dev_attr_detect_threshold.attr.attr,
+	&dev_attr_key_control.attr.attr,
+	&dev_attr_pulse_scale.attr.attr,
+	&dev_attr_calibrate.attr,
 	NULL
 };
 ATTRIBUTE_GROUPS(qt2120);
@@ -214,6 +322,7 @@ static int qt2120_probe(struct i2c_client *client)
 	if (!qt)
 		return -ENOMEM;
 	qt->client = client;
+	mutex_init(&qt->lock);
 	i2c_set_clientdata(client, qt);
 
 	/* nRESET is held low by a board pull-down until we release it */
@@ -245,13 +354,13 @@ static int qt2120_probe(struct i2c_client *client)
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to read linux,keycodes\n");
 
-	ret = qt2120_write_regs(qt, "microchip,detect-threshold", qt2120_dthr_reg);
+	ret = qt2120_write_prop(qt, "microchip,detect-threshold", QT2120_REG_DTHR(0));
 	if (ret)
 		return ret;
-	ret = qt2120_write_regs(qt, "microchip,key-control", qt2120_key_ctrl_reg);
+	ret = qt2120_write_prop(qt, "microchip,key-control", QT2120_REG_KEY_CTRL(0));
 	if (ret)
 		return ret;
-	ret = qt2120_write_regs(qt, "microchip,pulse-scale", qt2120_pulse_scale_reg);
+	ret = qt2120_write_prop(qt, "microchip,pulse-scale", QT2120_REG_PULSE_SCALE(0));
 	if (ret)
 		return ret;
 

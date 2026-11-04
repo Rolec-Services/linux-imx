@@ -754,7 +754,7 @@
 		/* KEY1 guard disabled (cannot be an output), unused KEY6..11 driven low */
 		microchip,key-control = /bits/ 8 <0x00 0x01 0x00 0x00 0x00 0x00
 						  0x01 0x01 0x01 0x01 0x01 0x01>;
-		/* Buttons: 32 samples / 4 = 8x gain for hover detection through the glass */
+		/* Buttons: 128 samples / 4 = 32x gain for hover detection through the glass */
 		microchip,pulse-scale = /bits/ 8 <0x00 0x00 0x72 0x72 0x72 0x72
 						  0x00 0x00 0x00 0x00 0x00 0x00>;
 	};
