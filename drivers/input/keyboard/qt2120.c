@@ -29,8 +29,9 @@
 #define QT2120_REG_DTHR(n)		(0x10 + (n))
 #define QT2120_REG_KEY_CTRL(n)		(0x1c + (n))
 #define QT2120_REG_PULSE_SCALE(n)	(0x28 + (n))
-#define QT2120_REG_KEY_SIGNAL		0x34	/* 12 x 16-bit, MSB first */
-#define QT2120_REG_REFERENCE		0x4c	/* 12 x 16-bit, MSB first */
+/* 12 x 16-bit, LSB first (the datasheet table says MSB, the chip disagrees) */
+#define QT2120_REG_KEY_SIGNAL		0x34
+#define QT2120_REG_REFERENCE		0x4c
 
 #define QT2120_DET_CALIBRATE		BIT(7)
 
@@ -163,7 +164,7 @@ static int qt2120_read_words(struct qt2120 *qt, u8 reg, u16 *vals)
 		return -EIO;
 
 	for (i = 0; i < QT2120_NUM_KEYS; i++)
-		vals[i] = (buf[2 * i] << 8) | buf[2 * i + 1];
+		vals[i] = buf[2 * i] | (buf[2 * i + 1] << 8);
 	return 0;
 }
 
