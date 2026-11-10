@@ -863,12 +863,18 @@ static int qh_schedule(struct ehci_hcd *ehci, struct ehci_qh *qh)
 	 */
 	/* "normal" case, uframing flexible except with splits */
 	if (qh->ps.bw_period) {
-		int		i;
+		int		i, j;
 		unsigned	frame;
 
 		for (i = qh->ps.bw_period; i > 0; --i) {
 			frame = ++ehci->random_frame & (qh->ps.bw_period - 1);
-			for (uframe = 0; uframe < 8; uframe++) {
+			for (j = 0; j < 8; j++) {
+				/*
+				 * Split (FS/LS) transactions: fill late uframes
+				 * first. FS iso IN transfers can only start in
+				 * early uframes and need them idle on the TT.
+				 */
+				uframe = qh->ps.c_usecs ? 7 - j : j;
 				status = check_intr_schedule(ehci,
 						frame, uframe, qh, &c_mask, tt);
 				if (status == 0)
