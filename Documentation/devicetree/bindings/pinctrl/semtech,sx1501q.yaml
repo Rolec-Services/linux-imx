@@ -47,6 +47,12 @@ properties:
 
   gpio-controller: true
 
+  '#pwm-cells':
+    const: 3
+    description:
+      The LED driver of each IO can be used as a PWM. The first cell is the
+      IO number, the second the period in ns and the third the PWM flags.
+
   semtech,probe-reset:
     description: Will trigger a reset of the GPIO expander on probe
     type: boolean
@@ -146,6 +152,15 @@ allOf:
     then:
       properties:
         semtech,probe-reset: false
+  - if:
+      not:
+        properties:
+          compatible:
+            contains:
+              const: semtech,sx1508q
+    then:
+      properties:
+        '#pwm-cells': false
   - if:
       properties:
         compatible:

@@ -287,11 +287,18 @@
 		clock-output-names = "hmi_cam_xclk";
 	};
 
-	/* SX1508 I/O3 -> AL8860 CTRL (high = on, PWM dimming not supported by sx150x) */
+	/*
+	 * SX1508 line 2 (HMI_BL_CTRL) -> AL8860 CTRL (high = on, low = off).
+	 * PWM from the SX1508 LED driver: ClkX = 2 MHz / 8, 255 steps per
+	 * cycle, so a 1.02 ms period (~980 Hz). Other usable periods are
+	 * 127500 ns * 2^n (n = 0..6); all sx1508 PWM users share one period.
+	 */
 	backlight_lvds: backlight-lvds {
-		compatible = "gpio-backlight";
-		gpios = <&sx1508 2 GPIO_ACTIVE_HIGH>;
-		default-on;
+		compatible = "pwm-backlight";
+		pwms = <&sx1508 2 1020000 0>;
+		brightness-levels = <0 100>;
+		num-interpolated-steps = <100>;
+		default-brightness-level = <80>;
 	};
 
 	/*
@@ -787,6 +794,7 @@
 		reg = <0x20>;
 		gpio-controller;
 		#gpio-cells = <2>;
+		#pwm-cells = <3>;	/* LED driver PWM, used by backlight_lvds */
 		reset-gpios = <&pcal6524 1 GPIO_ACTIVE_LOW>;	/* DISPLAY_GPIO2 */
 		gpio-line-names = "HMI_LED_B1", "HMI_LED_B2", "HMI_BL_CTRL", "",
 				  "HMI_LED_B4", "HMI_LED_B3", "HMI_CAM_LED", "",

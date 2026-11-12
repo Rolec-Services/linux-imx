@@ -11,6 +11,9 @@
  * Author: Gregory Bean <gbean@codeaurora.org>
  */
 
+#include <linux/bitfield.h>
+#include <linux/math64.h>
+#include <linux/pwm.h>
 #include <linux/regmap.h>
 #include <linux/i2c.h>
 #include <linux/init.h>
@@ -44,6 +47,29 @@ enum {
 	SX150X_IRQ_TYPE_EDGE_FALLING = 0x2,
 	SX150X_789_RESET_KEY1 = 0x12,
 	SX150X_789_RESET_KEY2 = 0x34,
+};
+
+/* RegClock: fOSC source and OSCIO function/frequency */
+#define SX150X_789_CLOCK_OSC_MASK	GENMASK(6, 5)
+#define SX150X_789_CLOCK_OSC_INTERNAL	2
+#define SX150X_789_CLOCK_OSCIO_MASK	GENMASK(4, 0)
+/* RegMisc[6:4]: LED driver clock, ClkX = fOSC / 2^(n - 1), 0 = off */
+#define SX150X_789_MISC_CLKX_MASK	GENMASK(6, 4)
+#define SX150X_789_CLKX_DIV_MAX		7
+#define SX150X_789_FOSC_HZ		2000000
+/* One LED driver PWM cycle is 255 ClkX periods, RegIOnX = low time */
+#define SX150X_LED_PWM_STEPS		255
+
+/*
+ * LED driver (PWM) registers. A zero RegTOnX/RegOffX address means the IO
+ * is not blinking capable and has no such register.
+ */
+struct sx150x_led_data {
+	u8 reg_input_disable;
+	u8 reg_led_enable;
+	u8 reg_ion[16];
+	u8 reg_ton[16];
+	u8 reg_off[16];
 };
 
 struct sx150x_123_pri {
@@ -92,6 +118,7 @@ struct sx150x_device_data {
 	} pri;
 	const struct pinctrl_pin_desc *pins;
 	unsigned int npins;
+	const struct sx150x_led_data *led;	/* NULL: no PWM support */
 };
 
 struct sx150x_pinctrl {
@@ -107,6 +134,11 @@ struct sx150x_pinctrl {
 	} irq;
 	struct mutex lock;
 	const struct sx150x_device_data *data;
+	/* LED driver PWM state, protected by pwm_lock */
+	struct mutex pwm_lock;
+	u32 pwm_requested;	/* lines claimed as PWM */
+	u32 pwm_running;	/* lines with the LED driver enabled */
+	unsigned int pwm_div;	/* shared RegMisc ClkX divider */
 };
 
 static const struct pinctrl_pin_desc sx150x_4_pins[] = {
@@ -300,6 +332,15 @@ static const struct sx150x_device_data sx1507q_device_data = {
 	.npins = ARRAY_SIZE(sx150x_4_pins),
 };
 
+/* SX1507/8/9 datasheet Rev 1, Table 11: all IOs support static intensity */
+static const struct sx150x_led_data sx1508q_led_data = {
+	.reg_input_disable	= 0x00,
+	.reg_led_enable		= 0x11,
+	.reg_ion = { 0x16, 0x17, 0x19, 0x1c, 0x20, 0x21, 0x23, 0x26 },
+	.reg_ton = { 0x00, 0x00, 0x18, 0x1b, 0x00, 0x00, 0x22, 0x25 },
+	.reg_off = { 0x00, 0x00, 0x1a, 0x1d, 0x00, 0x00, 0x24, 0x27 },
+};
+
 static const struct sx150x_device_data sx1508q_device_data = {
 	.model = SX150X_789,
 	.reg_pullup	= 0x03,
@@ -319,6 +360,7 @@ static const struct sx150x_device_data sx1508q_device_data = {
 	.ngpios = 8,
 	.pins = sx150x_8_pins,
 	.npins = ARRAY_SIZE(sx150x_8_pins),
+	.led = &sx1508q_led_data,
 };
 
 static const struct sx150x_device_data sx1509q_device_data = {
@@ -429,9 +471,24 @@ static int __sx150x_gpio_set(struct sx150x_pinctrl *pctl, unsigned int offset,
 static int sx150x_gpio_oscio_set(struct sx150x_pinctrl *pctl,
 				 int value)
 {
-	return regmap_write(pctl->regmap,
-			    pctl->data->pri.x789.reg_clock,
-			    (value ? 0x1f : 0x10));
+	/* Keep RegClock[6:5]: the LED driver PWM may be using fOSC */
+	return regmap_update_bits(pctl->regmap,
+				  pctl->data->pri.x789.reg_clock,
+				  SX150X_789_CLOCK_OSCIO_MASK,
+				  (value ? 0x1f : 0x10));
+}
+
+static int sx150x_gpio_request(struct gpio_chip *chip, unsigned int offset)
+{
+	struct sx150x_pinctrl *pctl = gpiochip_get_data(chip);
+	int ret = 0;
+
+	mutex_lock(&pctl->pwm_lock);
+	if (pctl->pwm_requested & BIT(offset))
+		ret = -EBUSY;
+	mutex_unlock(&pctl->pwm_lock);
+
+	return ret;
 }
 
 static int sx150x_gpio_set(struct gpio_chip *chip, unsigned int offset,
@@ -840,6 +897,238 @@ static const struct pinconf_ops sx150x_pinconf_ops = {
 	.is_generic = true,
 };
 
+/*
+ * PWM through the SX1507/8/9 LED driver in static mode (RegTOnX = 0).
+ *
+ * The LED driver is meant to sink a LED to VCC: while RegData[X] is 0 the IO
+ * is driven low for RegIOnX out of every 255 ClkX cycles, and high for the
+ * rest. A "normal" polarity PWM (duty = high time) therefore programs
+ * RegIOnX = 255 - duty steps; an inversed one programs the duty directly.
+ * 0% and 100% are produced with the LED driver off and RegData as a plain
+ * GPIO level, so a disabled PWM sits at its inactive level.
+ *
+ * ClkX (RegMisc[6:4]) is shared by every IO: the first running channel picks
+ * the period, the others must accept it. fOSC is the internal 2 MHz
+ * oscillator, so the possible periods are 127.5 us * 2^(0..6).
+ */
+static u64 sx150x_pwm_period_ns(unsigned int div)
+{
+	return div_u64((u64)SX150X_LED_PWM_STEPS * NSEC_PER_SEC,
+		       SX150X_789_FOSC_HZ) << (div - 1);
+}
+
+static int sx150x_pwm_clocks(struct sx150x_pinctrl *pctl, unsigned int div)
+{
+	const struct sx150x_789_pri *pri = &pctl->data->pri.x789;
+	int ret;
+
+	ret = regmap_update_bits(pctl->regmap, pri->reg_clock,
+				 SX150X_789_CLOCK_OSC_MASK,
+				 FIELD_PREP(SX150X_789_CLOCK_OSC_MASK,
+					    div ? SX150X_789_CLOCK_OSC_INTERNAL : 0));
+	if (ret)
+		return ret;
+
+	ret = regmap_update_bits(pctl->regmap, pri->reg_misc,
+				 SX150X_789_MISC_CLKX_MASK,
+				 FIELD_PREP(SX150X_789_MISC_CLKX_MASK, div));
+	if (ret)
+		return ret;
+
+	pctl->pwm_div = div;
+	return 0;
+}
+
+/* LED driver off, line is a plain output at @level */
+static int sx150x_pwm_set_level(struct sx150x_pinctrl *pctl, unsigned int ch,
+				bool level)
+{
+	const struct sx150x_led_data *led = pctl->data->led;
+	int ret;
+
+	ret = regmap_write_bits(pctl->regmap, pctl->data->reg_data,
+				BIT(ch), level ? BIT(ch) : 0);
+	if (ret)
+		return ret;
+
+	ret = regmap_write_bits(pctl->regmap, led->reg_led_enable, BIT(ch), 0);
+	if (ret)
+		return ret;
+
+	ret = regmap_write_bits(pctl->regmap, pctl->data->reg_dir, BIT(ch), 0);
+	if (ret)
+		return ret;
+
+	pctl->pwm_running &= ~BIT(ch);
+	if (!pctl->pwm_running && pctl->pwm_div)
+		return sx150x_pwm_clocks(pctl, 0);
+
+	return 0;
+}
+
+/* LED driver on, line low for @low out of 255 ClkX cycles */
+static int sx150x_pwm_set_led(struct sx150x_pinctrl *pctl, unsigned int ch,
+			      unsigned int div, unsigned int low)
+{
+	const struct sx150x_led_data *led = pctl->data->led;
+	int ret;
+
+	if (pctl->pwm_div != div) {
+		ret = sx150x_pwm_clocks(pctl, div);
+		if (ret)
+			return ret;
+	}
+
+	if (!(pctl->pwm_running & BIT(ch))) {
+		ret = regmap_write_bits(pctl->regmap, led->reg_input_disable,
+					BIT(ch), BIT(ch));
+		if (ret)
+			return ret;
+
+		/* Static mode: infinite ON time, OFF intensity 0 */
+		if (led->reg_ton[ch]) {
+			ret = regmap_write(pctl->regmap, led->reg_ton[ch], 0);
+			if (ret)
+				return ret;
+		}
+		if (led->reg_off[ch]) {
+			ret = regmap_write(pctl->regmap, led->reg_off[ch], 0);
+			if (ret)
+				return ret;
+		}
+
+		ret = regmap_write_bits(pctl->regmap, pctl->data->reg_dir,
+					BIT(ch), 0);
+		if (ret)
+			return ret;
+
+		ret = regmap_write_bits(pctl->regmap, led->reg_led_enable,
+					BIT(ch), BIT(ch));
+		if (ret)
+			return ret;
+	}
+
+	ret = regmap_write(pctl->regmap, led->reg_ion[ch], low);
+	if (ret)
+		return ret;
+
+	/* RegData low starts the LED driver */
+	ret = regmap_write_bits(pctl->regmap, pctl->data->reg_data, BIT(ch), 0);
+	if (ret)
+		return ret;
+
+	pctl->pwm_running |= BIT(ch);
+	return 0;
+}
+
+static int sx150x_pwm_request(struct pwm_chip *chip, struct pwm_device *pwm)
+{
+	struct sx150x_pinctrl *pctl = pwmchip_get_drvdata(chip);
+	unsigned int ch = pwm->hwpwm;
+	char *label;
+
+	label = gpiochip_dup_line_label(&pctl->gpio, ch);
+	if (IS_ERR(label))
+		return PTR_ERR(label);
+	if (label) {
+		dev_err(pctl->dev, "line %u already used as GPIO by %s\n",
+			ch, label);
+		kfree(label);
+		return -EBUSY;
+	}
+
+	mutex_lock(&pctl->pwm_lock);
+	pctl->pwm_requested |= BIT(ch);
+	mutex_unlock(&pctl->pwm_lock);
+
+	return 0;
+}
+
+static void sx150x_pwm_free(struct pwm_chip *chip, struct pwm_device *pwm)
+{
+	struct sx150x_pinctrl *pctl = pwmchip_get_drvdata(chip);
+
+	mutex_lock(&pctl->pwm_lock);
+	pctl->pwm_requested &= ~BIT(pwm->hwpwm);
+	mutex_unlock(&pctl->pwm_lock);
+}
+
+static int sx150x_pwm_apply(struct pwm_chip *chip, struct pwm_device *pwm,
+			    const struct pwm_state *state)
+{
+	struct sx150x_pinctrl *pctl = pwmchip_get_drvdata(chip);
+	bool normal = state->polarity == PWM_POLARITY_NORMAL;
+	unsigned int ch = pwm->hwpwm;
+	unsigned int div, steps, low;
+	u64 period, duty;
+	int ret;
+
+	mutex_lock(&pctl->pwm_lock);
+
+	if (!state->enabled) {
+		/* Inactive level: low for normal, high for inversed polarity */
+		ret = sx150x_pwm_set_level(pctl, ch, !normal);
+		goto out;
+	}
+
+	if (pctl->pwm_running & ~BIT(ch)) {
+		/* ClkX is shared with another running channel */
+		div = pctl->pwm_div;
+		if (sx150x_pwm_period_ns(div) > state->period) {
+			ret = -EBUSY;
+			goto out;
+		}
+	} else {
+		/* Longest supported period not above the requested one */
+		for (div = SX150X_789_CLKX_DIV_MAX; div; div--)
+			if (sx150x_pwm_period_ns(div) <= state->period)
+				break;
+		if (!div) {
+			ret = -EINVAL;
+			goto out;
+		}
+	}
+
+	period = sx150x_pwm_period_ns(div);
+	duty = min(state->duty_cycle, period);
+	steps = DIV64_U64_ROUND_CLOSEST(duty * SX150X_LED_PWM_STEPS, period);
+	/* steps = active time; the LED driver is programmed with low time */
+	low = normal ? SX150X_LED_PWM_STEPS - steps : steps;
+
+	if (low == 0)
+		ret = sx150x_pwm_set_level(pctl, ch, true);
+	else if (low == SX150X_LED_PWM_STEPS)
+		ret = sx150x_pwm_set_level(pctl, ch, false);
+	else
+		ret = sx150x_pwm_set_led(pctl, ch, div, low);
+out:
+	mutex_unlock(&pctl->pwm_lock);
+	return ret;
+}
+
+static const struct pwm_ops sx150x_pwm_ops = {
+	.request = sx150x_pwm_request,
+	.free = sx150x_pwm_free,
+	.apply = sx150x_pwm_apply,
+};
+
+static int sx150x_pwm_probe(struct sx150x_pinctrl *pctl)
+{
+	struct pwm_chip *chip;
+
+	if (!IS_ENABLED(CONFIG_PWM) || !pctl->data->led)
+		return 0;
+
+	chip = devm_pwmchip_alloc(pctl->dev, pctl->data->ngpios, 0);
+	if (IS_ERR(chip))
+		return PTR_ERR(chip);
+
+	pwmchip_set_drvdata(chip, pctl);
+	chip->ops = &sx150x_pwm_ops;
+
+	return devm_pwmchip_add(pctl->dev, chip);
+}
+
 static const struct i2c_device_id sx150x_id[] = {
 	{"sx1501q", (kernel_ulong_t) &sx1501q_device_data },
 	{"sx1502q", (kernel_ulong_t) &sx1502q_device_data },
@@ -1163,6 +1452,7 @@ static int sx150x_probe(struct i2c_client *client)
 	}
 
 	mutex_init(&pctl->lock);
+	mutex_init(&pctl->pwm_lock);
 
 	ret = sx150x_init_hw(pctl);
 	if (ret)
@@ -1186,6 +1476,7 @@ static int sx150x_probe(struct i2c_client *client)
 	/* Register GPIO controller */
 	pctl->gpio.base = -1;
 	pctl->gpio.ngpio = pctl->data->npins;
+	pctl->gpio.request = sx150x_gpio_request;
 	pctl->gpio.get_direction = sx150x_gpio_get_direction;
 	pctl->gpio.direction_input = sx150x_gpio_direction_input;
 	pctl->gpio.direction_output = sx150x_gpio_direction_output;
@@ -1262,6 +1553,10 @@ static int sx150x_probe(struct i2c_client *client)
 				     0, 0, pctl->data->npins);
 	if (ret)
 		return ret;
+
+	ret = sx150x_pwm_probe(pctl);
+	if (ret)
+		return dev_err_probe(dev, ret, "Failed to register PWM chip\n");
 
 	return 0;
 }
