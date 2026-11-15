@@ -267,7 +267,12 @@
 		startup-delay-us = <20000>;
 	};
 
-	/* CAMERA_GPIO1 -> HMI CAM_POWER: OV5640 LDOs, 24 MHz XCLK, I2C level shifter */
+	/*
+	 * CAMERA_GPIO1 -> HMI CAM_POWER: OV5640 LDOs, 24 MHz XCLK, I2C level shifter.
+	 * Not always-on: the HMI doesn't connect the OV5640 nRESET (and PWDN is
+	 * tied low), so switching this supply is the only hardware reset. The
+	 * ov5640 driver enables it at probe and at every stream start.
+	 */
 	reg_hmi_cam: regulator-hmi-cam {
 		compatible = "regulator-fixed";
 		regulator-name = "HMI_CAM_PWR";
@@ -276,7 +281,7 @@
 		gpio = <&pcal6524 16 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 		startup-delay-us = <20000>;
-        regulator-always-on;
+        /* regulator-always-on; */
 	};
 
 	/* On-board 24 MHz oscillator on the HMI, powered by CAM_POWER */
