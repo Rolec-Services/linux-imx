@@ -323,6 +323,20 @@
 	};
 };
 
+/*
+ * The NPU (Ethos-U65) runs from ml_root. imx93-lpm assumes the board booted
+ * in OD mode and doesn't set any clocks, so ml_root keeps whatever the boot
+ * loader left (24 MHz on the EVK) and every inference times out. Set the OD
+ * rates here, the same as imx93-lpm uses for ML_AXI in OD mode.
+ */
+&mlmix {
+	assigned-clocks = <&clk IMX93_CLK_ML_APB>,
+			  <&clk IMX93_CLK_ML>;
+	assigned-clock-parents = <&clk IMX93_CLK_SYS_PLL_PFD1_DIV2>,
+				 <&clk IMX93_CLK_SYS_PLL_PFD0>;
+	assigned-clock-rates = <133333333>, <1000000000>;
+};
+
 &adc1 {
 	vref-supply = <&reg_vref_1v8>;
 	status = "okay";
