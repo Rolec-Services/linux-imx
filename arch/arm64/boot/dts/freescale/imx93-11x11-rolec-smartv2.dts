@@ -89,17 +89,19 @@
 
 		/*
 		 * Ethos-U65 buffers (BOM part MIMX9352CVVXMAC has the NPU; the
-		 * schematic's MIMX9332 does not). Only 1 GB of DRAM is usable
-		 * (0x80000000-0xbfffffff), so use its top 256 MB instead of the
-		 * EVK's 0xc0000000, clear of the M33/ELE buffers at 0xa4000000.
+		 * schematic's MIMX9332 does not, and U-Boot deletes this node and
+		 * /ethosu on fused-off parts). A02 has 2 GB of DRAM but A03 only
+		 * 1 GB (0x80000000-0xbfffffff), so use the top 256 MB of the first
+		 * 1 GB instead of the EVK's 0xc0000000, clear of the M33/ELE
+		 * buffers at 0xa4000000 and OP-TEE at 0x96000000.
 		 */
-		//ethosu_mem: ethosu_region@b0000000 {
-		//	compatible = "shared-dma-pool";
-		//	reusable;
-		//	reg = <0x0 0xb0000000 0x0 0x10000000>;
-		//};
-		
-        vdev0vring0: vdev0vring0@a4000000 {
+		ethosu_mem: ethosu_region@b0000000 {
+			compatible = "shared-dma-pool";
+			reusable;
+			reg = <0x0 0xb0000000 0x0 0x10000000>;
+		};
+
+		vdev0vring0: vdev0vring0@a4000000 {
 			reg = <0 0xa4000000 0 0x8000>;
 			no-map;
 		};
@@ -183,12 +185,12 @@
 
 
 	/* Ethos-U65 NPU (MIMX9352), driven through firmware on the Cortex-M33 */
-	//ethosu {
-	//	compatible = "arm,ethosu";
-	//	fsl,cm33-proc = <&cm33>;
-	//	memory-region = <&ethosu_mem>;
-	//	power-domains = <&mlmix>;
-	//};
+	ethosu {
+		compatible = "arm,ethosu";
+		fsl,cm33-proc = <&cm33>;
+		memory-region = <&ethosu_mem>;
+		power-domains = <&mlmix>;
+	};
 
 /* AM
 	reg_can2_stby: regulator-can2-stby {
@@ -595,6 +597,20 @@
 		};
 	};
 	*/
+};
+
+/*
+ * The NPU (Ethos-U65) runs from ml_root. imx93-lpm assumes the board booted
+ * in OD mode and doesn't set any clocks, so ml_root keeps whatever the boot
+ * loader left (24 MHz) and every inference times out. Set the OD rates here,
+ * the same as imx93-lpm uses for ML_AXI in OD mode.
+ */
+&mlmix {
+	assigned-clocks = <&clk IMX93_CLK_ML_APB>,
+			  <&clk IMX93_CLK_ML>;
+	assigned-clock-parents = <&clk IMX93_CLK_SYS_PLL_PFD1_DIV2>,
+				 <&clk IMX93_CLK_SYS_PLL_PFD0>;
+	assigned-clock-rates = <133333333>, <1000000000>;
 };
 
 &adc1 {
