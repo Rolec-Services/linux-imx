@@ -292,23 +292,50 @@
  * Events
  */
 
+/*
+ * Each INT_ST_MAIN bit only summarises a per-category status register, and
+ * the main bit stays set (keeping the level interrupt asserted) until that
+ * register is read: the category registers are clear-on-read.
+ */
+#define CSI2RX_INT_ST_BNDRY_FRAME_FATAL			0x280
+#define CSI2RX_INT_ST_SEQ_FRAME_FATAL			0x290
+#define CSI2RX_INT_ST_CRC_FRAME_FATAL			0x2a0
+#define CSI2RX_INT_ST_PLD_CRC_FATAL			0x2b0
+#define CSI2RX_INT_ST_DATA_ID				0x2c0
+#define CSI2RX_INT_ST_ECC_CORRECT			0x2d0
+
 struct dwc_csi_event {
 	u32 mask;
+	u32 st_reg;		/* clear-on-read category status register */
 	const char * const name;
 	unsigned int counter;
+	u32 status;		/* OR of the category bits seen */
 };
 
 static const struct dwc_csi_event dwc_events[] = {
-	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI, "IPI Interface Fatal Error" },
-	{ CSI2RX_INT_ST_MAIN_ERR_PHY, "PHY Error" },
-	{ CSI2RX_INT_ST_MAIN_ERR_ECC, "Header Single Bit Error" },
-	{ CSI2RX_INT_ST_MAIN_ERR_DID, "Data ID Error" },
-	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_PLD_CRC, "Payload CRC Fatal Error" },
-	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_CRC_FRAME, "Frame CRC Fatal Error" },
-	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_SEQ_FRAME, "Frame Sequence Fatal Error" },
-	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_BNDRY_FRAMEL, "Frame Boundaries Fatal Error" },
-	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_PKT, "Packet Construction Fatal Error" },
-	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_PHY, "PHY Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI, CSI2RX_INT_ST_IPI_FATAL,
+	  "IPI Interface Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_ERR_PHY, CSI2RX_INT_ST_DPHY, "PHY Error" },
+	{ CSI2RX_INT_ST_MAIN_ERR_ECC, CSI2RX_INT_ST_ECC_CORRECT,
+	  "Header Single Bit Error" },
+	{ CSI2RX_INT_ST_MAIN_ERR_DID, CSI2RX_INT_ST_DATA_ID, "Data ID Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_PLD_CRC, CSI2RX_INT_ST_PLD_CRC_FATAL,
+	  "Payload CRC Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_CRC_FRAME, CSI2RX_INT_ST_CRC_FRAME_FATAL,
+	  "Frame CRC Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_SEQ_FRAME, CSI2RX_INT_ST_SEQ_FRAME_FATAL,
+	  "Frame Sequence Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_BNDRY_FRAMEL,
+	  CSI2RX_INT_ST_BNDRY_FRAME_FATAL, "Frame Boundaries Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_PKT, CSI2RX_INT_ST_PKT_FATAL,
+	  "Packet Construction Fatal Error" },
+	{ CSI2RX_INT_ST_MAIN_FATAL_ERR_PHY, CSI2RX_INT_ST_DPHY_FATAL,
+	  "PHY Fatal Error" },
+};
+
+static const char * const dwc_ipi_fatal_names[] = {
+	"IF FIFO underflow", "IF FIFO overflow", "frame sync",
+	"FIFO not empty", "HLINE time", "FIFO overflow", "PD FIFO overflow",
 };
 
 #define DWC_NUM_EVENTS		ARRAY_SIZE(dwc_events)
@@ -794,8 +821,10 @@ static void dwc_csi_clear_counters(struct dwc_csi_device *csidev)
 
 	spin_lock_irqsave(&csidev->slock, flags);
 
-	for (i = 0; i < DWC_NUM_EVENTS; ++i)
+	for (i = 0; i < DWC_NUM_EVENTS; ++i) {
 		csidev->events[i].counter = 0;
+		csidev->events[i].status = 0;
+	}
 
 	spin_unlock_irqrestore(&csidev->slock, flags);
 }
@@ -809,9 +838,10 @@ static void dwc_csi_log_counters(struct dwc_csi_device *csidev)
 
 	for (i = 0; i < DWC_NUM_EVENTS; ++i) {
 		if (csidev->events[i].counter > 0)
-			dev_info(csidev->dev, "%s events: %d\n",
+			dev_info(csidev->dev, "%s events: %d (status bits %#x)\n",
 				 csidev->events[i].name,
-				 csidev->events[i].counter);
+				 csidev->events[i].counter,
+				 csidev->events[i].status);
 	}
 
 	spin_unlock_irqrestore(&csidev->slock, flags);
@@ -1130,11 +1160,39 @@ static void dwc_csi_stop_stream(struct dwc_csi_device *csidev)
 }
 
 
+/*
+ * The D-PHY is released from reset in dwc_csi_start_stream(), before the
+ * sensor is started. A sensor that is still unpowered at that point (or
+ * leaves its lanes undriven until stream on, like the OV5640) presents LP-00,
+ * and the D-PHY clock lane can latch that as ULPS (RX_STATUS rxulpsclknot = 0).
+ * The sensor then goes straight to LP-11 without the ULPS exit sequence, and
+ * the clock lane stays in ULPS: the data lanes toggle between LP-11 and HS but
+ * no packet is ever received. Seen on the Smart V2 OV5640 in most stream
+ * starts. Once the sensor drives its lanes, pulse the D-PHY digital reset so
+ * the lane state machines start over from the real line state. The PHY
+ * configuration (hsfreqrange, lanes) and SHUTDOWNZ are kept.
+ */
+static void dwc_csi_dphy_resync(struct dwc_csi_device *csidev)
+{
+	u32 rx_status = dwc_csi_read(csidev, CSI2RX_DPHY_RX_STATUS);
+
+	/* Give the sensor time to reach LP-11 after stream on */
+	usleep_range(1000, 2000);
+
+	dwc_csi_write(csidev, CSI2RX_DPHY_RSTZ, 0);
+	ndelay(15);
+	dwc_csi_write(csidev, CSI2RX_DPHY_RSTZ, CSI2RX_DPHY_RSTZ_ENABLE);
+
+	dev_dbg(csidev->dev, "D-PHY resync: RX_STATUS %#x -> %#x\n", rx_status,
+		dwc_csi_read(csidev, CSI2RX_DPHY_RX_STATUS));
+}
+
 static int dwc_csi_enable_streams(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state, u32 pad,
 				  u64 streams_mask)
 {
 	struct dwc_csi_device *csidev = sd_to_dwc_csi_device(sd);
+	bool first_stream = !csidev->enabled_streams;
 	u64 sink_streams;
 	int ret;
 
@@ -1173,6 +1231,9 @@ static int dwc_csi_enable_streams(struct v4l2_subdev *sd,
 					 sink_streams);
 	if (ret)
 		return ret;
+
+	if (first_stream)
+		dwc_csi_dphy_resync(csidev);
 
 	csidev->enabled_streams |= streams_mask;
 
@@ -1527,20 +1588,55 @@ static irqreturn_t dwc_csi_irq_handler(int irq, void *priv)
 	u32 status;
 	int i;
 
+	u32 ipi_status = 0;
+
 	status = dwc_csi_read(csidev, CSI2RX_INT_ST_MAIN);
+	if (!(status & DWC_EVENT_MASK))
+		return IRQ_HANDLED;
 
 	spin_lock_irqsave(&csidev->slock, flags);
 
-	if (status & DWC_EVENT_MASK) {
-		for (i = 0; i < DWC_NUM_EVENTS; ++i) {
-			struct dwc_csi_event *event = &csidev->events[i];
+	for (i = 0; i < DWC_NUM_EVENTS; ++i) {
+		struct dwc_csi_event *event = &csidev->events[i];
+		u32 st;
 
-			if (status & event->mask)
-				event->counter++;
-		}
+		if (!(status & event->mask))
+			continue;
+
+		/* Reading the category register clears it and the main bit */
+		st = dwc_csi_read(csidev, event->st_reg);
+		event->counter++;
+		event->status |= st;
+		if (event->mask == CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI)
+			ipi_status = st;
 	}
 
 	spin_unlock_irqrestore(&csidev->slock, flags);
+
+	if (status & CSI2RX_INT_ST_MAIN_FATAL_ERR_IPI) {
+		/*
+		 * The IPI (pixel interface to the ISI) stops delivering pixels
+		 * after a fatal error until it is reset. The soft reset keeps
+		 * its configuration; the memory is flushed at the next frame
+		 * start (IPI_MEM_FLUSH_AUTO), so capture resumes there.
+		 */
+		dwc_csi_write(csidev, CSI2RX_IPI_SOFTRSTN, 0x0);
+		dwc_csi_write(csidev, CSI2RX_IPI_SOFTRSTN, 0x1);
+
+		if (printk_ratelimit()) {
+			char names[128] = "";
+			unsigned int b;
+			int len = 0;
+
+			for (b = 0; b < ARRAY_SIZE(dwc_ipi_fatal_names); b++)
+				if (ipi_status & BIT(b))
+					len += scnprintf(names + len, sizeof(names) - len,
+							 "%s%s", len ? ", " : "",
+							 dwc_ipi_fatal_names[b]);
+			dev_warn(csidev->dev, "IPI fatal error %#x (%s), IPI reset\n",
+				 ipi_status, names);
+		}
+	}
 
 	return IRQ_HANDLED;
 }
