@@ -380,6 +380,7 @@ struct dwc_csi_device {
 	u32 cfgclkfreqrange;
 	u32 hsfreqrange;
 	u64 enabled_streams;
+	bool source_pm;		/* source runtime-resumed by us while streaming */
 
 	spinlock_t slock;	/* Protect events */
 	struct mutex lock;
@@ -741,13 +742,16 @@ static int dwc_csi_device_init(struct dwc_csi_device *csidev)
 	/* Check if lanes are in stop state */
 	phy_stopstate = CSI2RX_DPHY_STOPSTATE_CLK_LANE;
 	phy_stopstate |= GENMASK(csidev->bus.num_data_lanes - 1, 0);
+	/*
+	 * The source should drive LP-11 by now (it is runtime-resumed before
+	 * the stream starts). A source that only drives its lanes at stream
+	 * on isn't fatal here: dwc_csi_dphy_resync() catches the result.
+	 */
 	ret = readl_poll_timeout(csidev->regs + CSI2RX_DPHY_STOPSTATE,
-				 val, (val & phy_stopstate) != phy_stopstate,
+				 val, (val & phy_stopstate) == phy_stopstate,
 				 10, 10000);
-	if (ret) {
-		dev_err(dev, "Lanes are not in stop state(%#x)\n", val);
-		return ret;
-	}
+	if (ret)
+		dev_dbg(dev, "Lanes are not in stop state(%#x)\n", val);
 
 	return 0;
 }
@@ -1161,29 +1165,35 @@ static void dwc_csi_stop_stream(struct dwc_csi_device *csidev)
 
 
 /*
- * The D-PHY is released from reset in dwc_csi_start_stream(), before the
- * sensor is started. A sensor that is still unpowered at that point (or
- * leaves its lanes undriven until stream on, like the OV5640) presents LP-00,
- * and the D-PHY clock lane can latch that as ULPS (RX_STATUS rxulpsclknot = 0).
- * The sensor then goes straight to LP-11 without the ULPS exit sequence, and
- * the clock lane stays in ULPS: the data lanes toggle between LP-11 and HS but
- * no packet is ever received. Seen on the Smart V2 OV5640 in most stream
- * starts. Once the sensor drives its lanes, pulse the D-PHY digital reset so
- * the lane state machines start over from the real line state. The PHY
- * configuration (hsfreqrange, lanes) and SHUTDOWNZ are kept.
+ * If the D-PHY is released from reset while the sensor doesn't drive its
+ * lanes yet (unpowered, or lanes released until stream on), it sees LP-00 and
+ * the clock lane can latch that as ULPS (RX_STATUS rxulpsclknot = 0). The
+ * sensor then goes straight to LP-11 without the ULPS exit sequence and the
+ * clock lane stays in ULPS: the data lanes toggle between LP-11 and HS but no
+ * packet is ever received. Seen on the Smart V2 OV5640 in most stream starts
+ * before the sensor was runtime-resumed ahead of the D-PHY.
+ *
+ * Fallback for sources without runtime PM: if the clock lane is in ULPS once
+ * the source streams, pulse the D-PHY digital reset so the lane state machines
+ * start over from the real line state. The PHY configuration (hsfreqrange,
+ * lanes) and SHUTDOWNZ are kept.
  */
 static void dwc_csi_dphy_resync(struct dwc_csi_device *csidev)
 {
-	u32 rx_status = dwc_csi_read(csidev, CSI2RX_DPHY_RX_STATUS);
+	u32 rx_status;
 
 	/* Give the sensor time to reach LP-11 after stream on */
 	usleep_range(1000, 2000);
+
+	rx_status = dwc_csi_read(csidev, CSI2RX_DPHY_RX_STATUS);
+	if (rx_status & CSI2RX_DPHY_RX_STATUS_CLK_LANE_ULP)
+		return;
 
 	dwc_csi_write(csidev, CSI2RX_DPHY_RSTZ, 0);
 	ndelay(15);
 	dwc_csi_write(csidev, CSI2RX_DPHY_RSTZ, CSI2RX_DPHY_RSTZ_ENABLE);
 
-	dev_dbg(csidev->dev, "D-PHY resync: RX_STATUS %#x -> %#x\n", rx_status,
+	dev_info(csidev->dev, "clock lane in ULPS, D-PHY resync: RX_STATUS %#x -> %#x\n", rx_status,
 		dwc_csi_read(csidev, CSI2RX_DPHY_RX_STATUS));
 }
 
@@ -1210,11 +1220,20 @@ static int dwc_csi_enable_streams(struct v4l2_subdev *sd,
 		if (ret < 0)
 			goto err_runtime_put;
 
+		/*
+		 * Power the source first, so that it drives LP-11 on all lanes
+		 * when the D-PHY comes out of reset, as the D-PHY spec expects.
+		 * Sources without runtime PM keep the old order and rely on
+		 * dwc_csi_dphy_resync().
+		 */
+		csidev->source_pm =
+			pm_runtime_resume_and_get(csidev->source_sd->dev) >= 0;
+
 		dwc_csi_clear_counters(csidev);
 
 		ret = dwc_csi_start_stream(csidev);
 		if (ret < 0)
-			goto err_runtime_put;
+			goto err_source_put;
 
 		dwc_csi_dump_regs(csidev);
 		dwc_csi_log_counters(csidev);
@@ -1229,8 +1248,13 @@ static int dwc_csi_enable_streams(struct v4l2_subdev *sd,
 
 	ret = v4l2_subdev_enable_streams(csidev->source_sd, csidev->remote_pad,
 					 sink_streams);
-	if (ret)
+	if (ret) {
+		if (first_stream) {
+			dwc_csi_stop_stream(csidev);
+			goto err_source_put;
+		}
 		return ret;
+	}
 
 	if (first_stream)
 		dwc_csi_dphy_resync(csidev);
@@ -1239,6 +1263,10 @@ static int dwc_csi_enable_streams(struct v4l2_subdev *sd,
 
 	return 0;
 
+err_source_put:
+	if (csidev->source_pm)
+		pm_runtime_put(csidev->source_sd->dev);
+	csidev->source_pm = false;
 err_runtime_put:
 	pm_runtime_put(csidev->dev);
 	return ret;
@@ -1266,6 +1294,9 @@ static int dwc_csi_disable_streams(struct v4l2_subdev *sd,
 	if (!csidev->enabled_streams) {
 		dwc_csi_stop_stream(csidev);
 		dwc_csi_log_counters(csidev);
+		if (csidev->source_pm)
+			pm_runtime_put(csidev->source_sd->dev);
+		csidev->source_pm = false;
 		pm_runtime_put(csidev->dev);
 	}
 
