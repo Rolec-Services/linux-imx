@@ -2566,13 +2566,21 @@ static int ov5640_set_power_mipi(struct ov5640_dev *sensor, bool on)
 		return ret;
 
 	/*
-	 * Gate clock and set LP11 in 'no packets mode' (idle)
+	 * Clock lane mode and LP11 in 'no packets mode' (idle)
 	 *
-	 * 0x4800 = 0x24
-	 * [5] = 1	: Gate clock when 'no packets'
+	 * 0x4800 = 0x24 (clock-noncontinuous in DT) or 0x04
+	 * [5] = 1/0	: Gate clock when 'no packets' / free-running clock
 	 * [2] = 1	: MIPI bus in LP11 when 'no packets'
+	 *
+	 * Without the clock-noncontinuous endpoint property the receiver
+	 * expects a continuous clock (video-interfaces.yaml). A gated clock
+	 * makes the receiver re-acquire the clock lane for every line, which
+	 * on a marginal link loses packets: broken frames and IPI FIFO
+	 * overflows on the i.MX93 Smart V2 HMI camera.
 	 */
-	ret = ov5640_write_reg(sensor, OV5640_REG_MIPI_CTRL00, 0x24);
+	ret = ov5640_write_reg(sensor, OV5640_REG_MIPI_CTRL00,
+			       (sensor->ep.bus.mipi_csi2.flags &
+				V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK) ? 0x24 : 0x04);
 	if (ret)
 		return ret;
 
