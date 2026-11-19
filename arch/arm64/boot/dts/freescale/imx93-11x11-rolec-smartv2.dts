@@ -91,14 +91,21 @@
 		 * Ethos-U65 buffers (BOM part MIMX9352CVVXMAC has the NPU; the
 		 * schematic's MIMX9332 does not, and U-Boot deletes this node and
 		 * /ethosu on fused-off parts). A02 has 2 GB of DRAM but A03 only
-		 * 1 GB (0x80000000-0xbfffffff), so use the top 256 MB of the first
-		 * 1 GB instead of the EVK's 0xc0000000, clear of the M33/ELE
-		 * buffers at 0xa4000000 and OP-TEE at 0x96000000.
+		 * 1 GB (0x80000000-0xbfffffff), so the EVK's 0xc0000000 can't be
+		 * used. 128 MB at 0xa8000000 fits both, above the M33/ELE buffers
+		 * at 0xa4000000-0xa421ffff and OP-TEE at 0x96000000.
+		 *
+		 * Not at or above 0xb0000000: on an A03 board (SK hynix
+		 * H9HCNNNBKMML) every NPU inference with its buffers there hung
+		 * until the 60 s driver timeout (tested 0xb0000000 256 MB,
+		 * 0xb0000000 128 MB and 0xb8000000 128 MB), although CPU memory
+		 * tests of that range pass. 0xa8000000 runs MobileNet in 3.7 ms.
+		 * Cause not found yet.
 		 */
-		ethosu_mem: ethosu_region@b0000000 {
+		ethosu_mem: ethosu_region@a8000000 {
 			compatible = "shared-dma-pool";
 			reusable;
-			reg = <0x0 0xb0000000 0x0 0x10000000>;
+			reg = <0x0 0xa8000000 0x0 0x8000000>;
 		};
 
 		vdev0vring0: vdev0vring0@a4000000 {
@@ -395,11 +402,24 @@
 			gpios = <&sx1508 4 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 		};
+	};
+
+	/*
+	 * HMI camera LED on the SX1508 LED driver (IO6, active high), so its
+	 * brightness can be set. The application switches it on while it shows
+	 * the camera picture; it is deliberately not linked to the OV5640 as a
+	 * V4L2 privacy LED, which would take it away from userspace.
+	 * The SX1508 PWM channels share one clock divider, so the period must
+	 * match backlight_lvds.
+	 */
+	hmi-pwm-leds {
+		compatible = "pwm-leds";
 
 		led-camera {
 			label = "hmi-camera-active";
-			gpios = <&sx1508 6 GPIO_ACTIVE_HIGH>;
+			pwms = <&sx1508 6 1020000 0>;
 			color = <LED_COLOR_ID_RED>;
+			max-brightness = <255>;
 			default-state = "off";
 		};
 	};
@@ -815,7 +835,7 @@
 		reg = <0x20>;
 		gpio-controller;
 		#gpio-cells = <2>;
-		#pwm-cells = <3>;	/* LED driver PWM, used by backlight_lvds */
+		#pwm-cells = <3>;	/* LED driver PWM: backlight_lvds, camera LED */
 		reset-gpios = <&pcal6524 1 GPIO_ACTIVE_LOW>;	/* DISPLAY_GPIO2 */
 		gpio-line-names = "HMI_LED_B1", "HMI_LED_B2", "HMI_BL_CTRL", "",
 				  "HMI_LED_B4", "HMI_LED_B3", "HMI_CAM_LED", "",
